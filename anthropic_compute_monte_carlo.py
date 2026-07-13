@@ -78,10 +78,8 @@ def percentiles(samples):
 # TPU TDPs, the IT-power overhead, and the Trainium2 power equivalency.
 
 # %%
-import sys
-if not Path('lab_compute_utils.py').exists():
-    sys.path.append(str(Path('ai-lab-compute').resolve()))  # allow running from the repo root
 from lab_compute_utils import load_lab_params, lab_params_table
+from epoch_data import load_chip_sales_cumulative
 
 LAB_PARAMS = load_lab_params()
 PARAMS = LAB_PARAMS['anthropic']
@@ -107,9 +105,7 @@ lab_params_table('anthropic')
 def load_openai_namespace():
     """Execute the OpenAI notebook script and hand back its variables, without
     letting its own prints or charts render here."""
-    oai_path = ('openai_compute_monte_carlo.py'
-                if Path('openai_compute_monte_carlo.py').exists()
-                else 'ai-lab-compute/openai_compute_monte_carlo.py')
+    oai_path = 'openai_compute_monte_carlo.py'
     original_show = plt.show
     plt.show = lambda *args, **kwargs: None  # swallow the OpenAI figures
     try:
@@ -232,11 +228,7 @@ tpu_native_8bit_flops = {'TPU v5e': 3.93e14, 'TPU v5p': 9.18e14, 'TPU v6e': 1.83
 tpu_it_watts = {chip: tpu_tdp_w[chip] * IT_OVERHEAD for chip in tpu_tdp_w}
 tpu_h100e_per_chip = {chip: tpu_native_8bit_flops[chip] / H100_FLOPS for chip in tpu_tdp_w}
 
-for candidate in ('csv_export/tpu_cumulative_by_chip.csv', '../csv_export/tpu_cumulative_by_chip.csv'):
-    if Path(candidate).exists():
-        tpu_cumulative = pd.read_csv(candidate)
-        break
-tpu_cumulative['End date'] = pd.to_datetime(tpu_cumulative['End date'])
+tpu_cumulative = load_chip_sales_cumulative('Google')
 tpu_snapshot = tpu_cumulative[tpu_cumulative['End date'] == pd.Timestamp('2025-12-31')]
 tpu_units = {chip: float(tpu_snapshot.loc[tpu_snapshot['Chip type'] == chip, 'Number of units (median)'].iloc[0])
              for chip in tpu_tdp_w}

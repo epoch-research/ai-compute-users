@@ -38,13 +38,11 @@ import squigglepy as sq
 N_SAMPLES = 5000
 H100_FLOPS = 1.979e15  # H100 dense 8-bit FLOP/s, the H100e denominator
 
-# Data lives at repo root (csv_export/) and in ai-lab-compute/; resolve either
-# whether the script is run from the repo root or from ai-lab-compute/.
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
 
-sys.path.insert(0, str(HERE))  # so lab_compute_utils resolves from any cwd
+sys.path.insert(0, str(HERE))  # so sibling modules resolve from any cwd
 from lab_compute_utils import load_lab_params
+from epoch_data import load_nvidia_owners_cumulative, load_chip_sales_cumulative
 
 # Each model reseeds 42 so it reproduces its canonical notebook run. Side
 # effect: the labs share one RNG stream, so per-sample values are artificially
@@ -213,7 +211,7 @@ OAI_CHIP_TYPES = ["A100", "H100/H200", "B200", "B300"]
 
 def _load_openai_data():
     """OpenAI's disclosed power, Microsoft's cumulative fleet, and per-chip specs."""
-    owners_df = pd.read_csv(HERE / "data" / "nvidia_owners_cumulative_by_chip.csv")
+    owners_df = load_nvidia_owners_cumulative()
     chip_power_df = pd.read_csv(HERE / "data" / "IT power by chip.csv")
     openai_df = pd.read_csv(HERE / "data" / "lab IT power.csv")
     openai_df["Date"] = pd.to_datetime(openai_df["Date"], format="%m/%d/%y")
@@ -432,8 +430,7 @@ def _tpu_mix_per_mw():
     it_watts = {c: tpu_tdp_w[c] * IT_OVERHEAD for c in tpu_tdp_w}
     h100e_per_chip = {c: tpu_8bit[c] / H100_FLOPS for c in tpu_tdp_w}
 
-    df = pd.read_csv(ROOT / "csv_export" / "tpu_cumulative_by_chip.csv")
-    df["End date"] = pd.to_datetime(df["End date"])
+    df = load_chip_sales_cumulative("Google")
     snap = df[df["End date"] == pd.Timestamp("2025-12-31")]
     units = {c: float(snap.loc[snap["Chip type"] == c, "Number of units (median)"].iloc[0])
              for c in tpu_tdp_w}
@@ -504,11 +501,11 @@ def model_anthropic(openai_result):
 # lab share), promoted from the lab_2024_backcasts notebook, with two changes
 # in how the first two factors are obtained:
 #
-#  - Owned fleets are read from the quarterly dashboard CSVs at end-2024, as
-#    lognormals through the summed per-chip 5th/95th columns. (Summing per-chip
-#    percentile bounds treats chips as perfectly correlated, so the CIs are on
-#    the generous side -- the convention the end-2025 sheet rows effectively
-#    used.)
+#  - Owned fleets are read from Epoch's published quarterly estimates at
+#    end-2024, as lognormals through the summed per-chip 5th/95th columns.
+#    (Summing per-chip percentile bounds treats chips as perfectly correlated,
+#    so the CIs are on the generous side -- the convention the end-2025 sheet
+#    rows effectively used.)
 #  - The operational/owned ratio is computed from the owned-stock trajectory
 #    under a sampled deployment lag instead of hand-derived: fleets grew
 #    ~3.5-4.5x during 2024, so the 2025 ratios would overstate early years.
@@ -518,33 +515,26 @@ def model_anthropic(openai_result):
 # those predecessor scopes.
 
 END_2024 = pd.Timestamp("2024-12-31")
-OWNERS_CSV = HERE / "data" / "nvidia_owners_cumulative_by_chip.csv"
-TPU_CSV = ROOT / "csv_export" / "tpu_cumulative_by_chip.csv"
-AMD_CSV = ROOT / "csv_export" / "amd_cumulative_by_chip.csv"
 
 
-def owner_quarterly_h100e_medians(csv_path, owner=None):
+def owner_quarterly_h100e_medians(df, owner=None):
     """Quarterly cumulative H100e medians (summed across chip types) as a
     Series indexed by quarter-end date; optionally one owner's slice."""
-    df = pd.read_csv(csv_path)
     if owner is not None:
         df = df[df["Owner"] == owner]
-    df["End date"] = pd.to_datetime(df["End date"])
     return df.groupby("End date")["Compute estimate in H100e (median)"].sum()
 
 
-def end_2024_fleet_dist(csv_path, owner=None):
-    """Owned-fleet H100e at end-2024, as a lognormal through the dashboard's
-    summed per-chip 5th/95th columns. The owners CSV and the TPU/AMD exports
-    name those columns differently."""
-    df = pd.read_csv(csv_path)
+def end_2024_fleet_dist(df, owner=None):
+    """Owned-fleet H100e at end-2024, as a lognormal through the summed
+    per-chip 5th/95th columns. The owners data and the chip-sales data name
+    those columns differently."""
     if owner is not None:
         df = df[df["Owner"] == owner]
         lo_col, hi_col = "H100e (5th percentile)", "H100e (95th percentile)"
     else:
         lo_col, hi_col = ("Compute estimate in H100e (5th percentile)",
                           "Compute estimate in H100e (95th percentile)")
-    df["End date"] = pd.to_datetime(df["End date"])
     snap = df[df["End date"] == END_2024]
     return sq.to(snap[lo_col].sum(), snap[hi_col].sum())
 
@@ -563,15 +553,15 @@ def operational_ratio_2024(stock_series, lag_quarters):
 def model_deepmind_2024():
     sq.set_seed(42)
     P = load_lab_params()["deepmind"]
-    nvidia_owned = end_2024_fleet_dist(OWNERS_CSV, "Google") @ N_SAMPLES
-    google_owned = end_2024_fleet_dist(TPU_CSV) @ N_SAMPLES  # TPU fleet
+    nvidia_owned = end_2024_fleet_dist(load_nvidia_owners_cumulative(), "Google") @ N_SAMPLES
+    google_owned = end_2024_fleet_dist(load_chip_sales_cumulative("Google")) @ N_SAMPLES  # TPUs
     total_owned = nvidia_owned + google_owned
 
     # Operational share of owned: sample the install lag, then read the owned
     # stock that many quarters before end-2024 off the trajectory.
     lag_quarters = P["lag_quarters_2024"] @ N_SAMPLES
-    stock = (owner_quarterly_h100e_medians(OWNERS_CSV, "Google")
-             + owner_quarterly_h100e_medians(TPU_CSV)).dropna()
+    stock = (owner_quarterly_h100e_medians(load_nvidia_owners_cumulative(), "Google")
+             + owner_quarterly_h100e_medians(load_chip_sales_cumulative("Google"))).dropna()
     deployment_lag = operational_ratio_2024(stock, lag_quarters)
     operational = total_owned * deployment_lag
 
@@ -603,8 +593,8 @@ def model_msl_2024():
     fleet (the dashboards don't split AMD by owner); MTIA excluded."""
     sq.set_seed(42)
     P = load_lab_params()["msl"]
-    nvidia_owned = end_2024_fleet_dist(OWNERS_CSV, "Meta") @ N_SAMPLES
-    amd_all_owners = end_2024_fleet_dist(AMD_CSV) @ N_SAMPLES
+    nvidia_owned = end_2024_fleet_dist(load_nvidia_owners_cumulative(), "Meta") @ N_SAMPLES
+    amd_all_owners = end_2024_fleet_dist(load_chip_sales_cumulative("AMD")) @ N_SAMPLES
     meta_amd_share = P["meta_amd_share_2024"] @ N_SAMPLES
     amd_owned = amd_all_owners * meta_amd_share
     total_owned = nvidia_owned + amd_owned
@@ -612,8 +602,8 @@ def model_msl_2024():
     # Operational share of owned, as in the DeepMind backcast. The trajectory
     # uses the median AMD share; only the level uncertainty is sampled.
     lag_quarters = P["lag_quarters_2024"] @ N_SAMPLES
-    nvidia_stock = owner_quarterly_h100e_medians(OWNERS_CSV, "Meta")
-    amd_stock = (owner_quarterly_h100e_medians(AMD_CSV)
+    nvidia_stock = owner_quarterly_h100e_medians(load_nvidia_owners_cumulative(), "Meta")
+    amd_stock = (owner_quarterly_h100e_medians(load_chip_sales_cumulative("AMD"))
                  .reindex(nvidia_stock.index).fillna(0.0))
     stock = (nvidia_stock + float(np.median(meta_amd_share)) * amd_stock).dropna()
     deployment_lag = operational_ratio_2024(stock, lag_quarters)

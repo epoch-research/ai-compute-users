@@ -1,0 +1,19 @@
+CLAUDE.md
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Claude Code local state
+.claude/
+
+# Epoch data hub download cache (see epoch_data.py)
+.cache/

@@ -39,7 +39,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# The lab models live one directory up (ai-lab-compute/).
+# The lab models live one directory up (the repo root).
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 

@@ -49,8 +49,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import squigglepy as sq
 
-HERE = Path('.') if Path('frontier_lab_compute_model.py').exists() else Path('ai-lab-compute')
-sys.path.insert(0, str(HERE.resolve()))
+sys.path.insert(0, str(Path('.').resolve()))
 import frontier_lab_compute_model as frontier
 
 LAB_COLORS = {'Google DeepMind': '#2B8C86', 'Meta AI / MSL': '#2B6CB8',
@@ -147,10 +146,12 @@ meta_steps = {s['name']: s for s in frontier.MODEL_STEPS['msl_2024']}
 # Rebuild the owned-stock trajectories the models read their lag ratios off,
 # to show the ratio at a few fixed lags. The Meta trajectory folds in the AMD
 # slice at the sampled share's median, as the model does.
-google_stock = (frontier.owner_quarterly_h100e_medians(frontier.OWNERS_CSV, 'Google')
-                + frontier.owner_quarterly_h100e_medians(frontier.TPU_CSV)).dropna()
-meta_nvidia_stock = frontier.owner_quarterly_h100e_medians(frontier.OWNERS_CSV, 'Meta')
-meta_amd_stock = (frontier.owner_quarterly_h100e_medians(frontier.AMD_CSV)
+nvidia_owners = frontier.load_nvidia_owners_cumulative()
+google_stock = (frontier.owner_quarterly_h100e_medians(nvidia_owners, 'Google')
+                + frontier.owner_quarterly_h100e_medians(
+                    frontier.load_chip_sales_cumulative('Google'))).dropna()
+meta_nvidia_stock = frontier.owner_quarterly_h100e_medians(nvidia_owners, 'Meta')
+meta_amd_stock = (frontier.owner_quarterly_h100e_medians(frontier.load_chip_sales_cumulative('AMD'))
                   .reindex(meta_nvidia_stock.index).fillna(0.0))
 meta_amd_share_med = float(np.median(meta_steps['meta_amd_share_2024']['samples']))
 meta_stock = (meta_nvidia_stock + meta_amd_share_med * meta_amd_stock).dropna()
@@ -233,8 +234,7 @@ for name in ['nvidia_owned', 'google_owned', 'operational', 'total_h100e']:
 def load_anthropic_2024():
     """Execute the Anthropic backcast notebook script and return its end-2024
     samples, without letting its prints or charts render here."""
-    path = ('anthropic_2024_backcast.py' if Path('anthropic_2024_backcast.py').exists()
-            else 'ai-lab-compute/anthropic_2024_backcast.py')
+    path = 'anthropic_2024_backcast.py'
     original_show = plt.show
     plt.show = lambda *args, **kwargs: None
     try:

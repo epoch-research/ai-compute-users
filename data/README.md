@@ -8,15 +8,13 @@ Hand-maintained inputs:
   `openai_compute_monte_carlo`.
 - `lab IT power.csv` — OpenAI's disclosed IT power by date. Read by the same two.
 
-Pinned snapshots of root-notebook exports (deliberately frozen so the lab models
-don't shift when the root notebooks re-run; refresh by copying from
-`../../csv_export/` / `../../owners_csv_export/` when you want new fleet data):
+Chip fleet data (Nvidia per-owner fleets, TPU and AMD cumulative sales) is no
+longer stored here — it is fetched at runtime from the Epoch AI data hub via
+`../epoch_data.py` (AI Chip Sales and AI Chip Owners datasets), with downloads
+cached one-per-day under `../.cache/`.
 
-- `nvidia_owners_cumulative_by_chip.csv` — from `owners_csv_export/`, produced by
-  the root `nvidia_owners.ipynb`. Read by `frontier_lab_compute_model.py` and
-  `openai_compute_monte_carlo`.
-- `nvidia_calendar_quarter_chip_timelines.csv` — from `csv_export/`, produced by
-  the root `nvidia_estimates.ipynb`. Only read by
+Legacy snapshot from before the split out of the ai-chip-counts repo:
+
+- `nvidia_calendar_quarter_chip_timelines.csv` — from ai-chip-counts
+  `csv_export/`, produced by its `nvidia_estimates.ipynb`. Only read by
   `archive/coreweave_it_power_point_estimate.py`.
-- `nvidia_cumulative_by_chip.csv` — from `csv_export/`. **No current readers**;
-  kept for now, candidate for deletion.

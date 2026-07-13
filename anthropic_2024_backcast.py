@@ -47,8 +47,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import squigglepy as sq
 
-HERE = Path('.') if Path('frontier_lab_compute_model.py').exists() else Path('ai-lab-compute')
-sys.path.insert(0, str(HERE.resolve()))
+sys.path.insert(0, str(Path('.').resolve()))
 import frontier_lab_compute_model as frontier
 
 N_SAMPLES = 5000

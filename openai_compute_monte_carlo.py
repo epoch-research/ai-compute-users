@@ -85,10 +85,8 @@ def percentiles(samples):
 # The sensitivity sweeps in sections 6–8 build local variants and don't touch it.
 
 # %%
-import sys
-if not Path('lab_compute_utils.py').exists():
-    sys.path.append(str(Path('ai-lab-compute').resolve()))  # allow running from the repo root
 from lab_compute_utils import load_lab_params, lab_params_table
+from epoch_data import load_nvidia_owners_cumulative
 
 _ALL_PARAMS = load_lab_params()
 PARAMS = _ALL_PARAMS['openai']
@@ -98,15 +96,14 @@ lab_params_table('openai')
 # %% [markdown]
 # ## 1. Load the data and derive model inputs
 #
-# Three CSVs (the same ones the main model uses) give us: OpenAI's disclosed
-# power per year, Microsoft's fleet over time, and IT power per chip.
+# Two local CSVs give OpenAI's disclosed power per year and IT power per chip;
+# Microsoft's fleet over time comes from Epoch's published AI Chip Owners data
+# (fetched at runtime, same inputs the main model uses).
 
 # %%
-data_dir = Path('ai-lab-compute/data') if Path('ai-lab-compute/data').exists() else Path('data')
-
-owners_df = pd.read_csv(data_dir / 'nvidia_owners_cumulative_by_chip.csv')
-chip_power_df = pd.read_csv(data_dir / 'IT power by chip.csv')
-openai_df = pd.read_csv(data_dir / 'lab IT power.csv')
+owners_df = load_nvidia_owners_cumulative()
+chip_power_df = pd.read_csv('data/IT power by chip.csv')
+openai_df = pd.read_csv('data/lab IT power.csv')
 openai_df['Date'] = pd.to_datetime(openai_df['Date'], format='%m/%d/%y')
 
 # Watts per GPU = server power per GPU x IT overhead factor. We read the server

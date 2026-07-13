@@ -90,9 +90,7 @@ def percentiles(samples):
 def load_openai_namespace():
     """Execute the OpenAI notebook script and hand back its variables, without
     letting its own prints or charts render here."""
-    oai_path = ('openai_compute_monte_carlo.py'
-                if Path('openai_compute_monte_carlo.py').exists()
-                else 'ai-lab-compute/openai_compute_monte_carlo.py')
+    oai_path = 'openai_compute_monte_carlo.py'
     original_show = plt.show
     plt.show = lambda *args, **kwargs: None  # swallow the OpenAI figures
     try:
