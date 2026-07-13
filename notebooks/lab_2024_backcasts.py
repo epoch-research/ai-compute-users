@@ -20,7 +20,7 @@
 # years. The Google DeepMind and Meta backcasts are **canonical** (promoted
 # 2026-07-10): their judgment priors live in `lab_model_params.csv` (the `*_2024`
 # rows) and the model structure in `frontier_lab_compute_model.py` section 5
-# (`model_deepmind_2024`, `model_msl_2024`), exported by `lab_compute_tables/`
+# (`model_deepmind_2024`, `model_msl_2024`), exported by `generate_lab_compute_tables.py`
 # alongside the end-2025 rows. This notebook is the walkthrough and cross-lab
 # comparison — it restates no priors.
 #
@@ -49,7 +49,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import squigglepy as sq
 
-sys.path.insert(0, str(Path('.').resolve()))
+# The frontier script lives at the repo root, one level up from notebooks/.
+sys.path.insert(0, str(Path('..').resolve()))
 import frontier_lab_compute_model as frontier
 
 LAB_COLORS = {'Google DeepMind': '#2B8C86', 'Meta AI / MSL': '#2B6CB8',
@@ -309,7 +310,7 @@ plt.show()
 #   reports the current canonical script.
 # - **Promoted 2026-07-10:** the DeepMind and Meta priors live in
 #   `lab_model_params.csv` (`*_2024` rows), the models in the frontier script
-#   (section 5), and `lab_compute_tables` exports the extra (lab × year) rows in
+#   (section 5), and `generate_lab_compute_tables.py` exports the extra (lab × year) rows in
 #   both tables and the consolidated page (`build_compute_page.py` →
 #   `index.html`). Anthropic's backcast deliberately stays notebook-only —
 #   promote it the same way if it should ship.

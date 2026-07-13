@@ -1,5 +1,11 @@
 # Data inputs for the lab compute models
 
+Generated exports (do not hand-edit — regenerate with
+`python3.11 generate_lab_compute_tables.py` from the repo root):
+
+- `lab_compute_year_end_by_lab.csv` / `lab_compute_intermediates_by_lab.csv` —
+  the frontier-lab compute tables (see the root README).
+
 Hand-maintained inputs:
 
 - `IT power by chip.csv` — per-GPU IT power for Nvidia chips (canonical location

@@ -49,11 +49,17 @@
 # `archive/openai_power_model.ipynb` reference.
 
 # %%
+import sys
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import squigglepy as sq
+
+# Shared modules (lab_compute_utils, epoch_data) live at the repo root, one
+# level up from notebooks/.
+sys.path.insert(0, str(Path('..').resolve()))
 
 N_SAMPLES = 5000
 sq.set_seed(42)  # squigglepy has its own RNG; np.random.seed does not affect it
@@ -102,8 +108,8 @@ lab_params_table('openai')
 
 # %%
 owners_df = load_nvidia_owners_cumulative()
-chip_power_df = pd.read_csv('data/IT power by chip.csv')
-openai_df = pd.read_csv('data/lab IT power.csv')
+chip_power_df = pd.read_csv('../data/IT power by chip.csv')
+openai_df = pd.read_csv('../data/lab IT power.csv')
 openai_df['Date'] = pd.to_datetime(openai_df['Date'], format='%m/%d/%y')
 
 # Watts per GPU = server power per GPU x IT overhead factor. We read the server

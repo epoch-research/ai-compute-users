@@ -24,7 +24,8 @@ deliberately not promoted here.
 
 Each model also records the intermediate quantities behind its final
 distribution in MODEL_STEPS (pure bookkeeping, no effect on results), which
-lab_compute_tables/ exports as a table and a walkthrough page.
+generate_lab_compute_tables.py exports as a table and build_compute_page.py
+renders as a walkthrough page.
 """
 
 import sys
@@ -65,9 +66,9 @@ def pctiles(samples):
 
 # Each model_*() call refreshes its lab's entry here with an ordered list of
 # the intermediate quantities behind its final distribution, so downstream
-# exports (lab_compute_tables/) can show how each estimate is built. Pure
-# bookkeeping: recording steps draws no samples and changes no results. Read
-# a lab's entry right after calling its model.
+# exports (generate_lab_compute_tables.py) can show how each estimate is
+# built. Pure bookkeeping: recording steps draws no samples and changes no
+# results. Read a lab's entry right after calling its model.
 MODEL_STEPS = {}
 
 

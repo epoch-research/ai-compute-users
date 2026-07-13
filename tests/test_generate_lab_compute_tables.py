@@ -5,14 +5,10 @@ expected shape, and produce estimates with ordered percentiles in a plausible
 range for every tracked lab — and that the intermediates table tells a
 consistent story (one final step per lab, matching the year-end table).
 """
-import sys
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from generate_tables import (get_all_tables, LAB_ORDER, LAB_YEAR_KEYS, COLUMNS,
+from generate_lab_compute_tables import (get_all_tables, LAB_ORDER, LAB_YEAR_KEYS, COLUMNS,
                              INTERMEDIATE_COLUMNS)
 
 TRACKED_LABS = set(LAB_ORDER)

@@ -51,10 +51,17 @@
 #
 
 # %%
+import sys
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 import squigglepy as sq
 from squigglepy.numbers import K, M
+
+# Shared modules (lab_compute_utils, epoch_data) live at the repo root, one
+# level up from notebooks/.
+sys.path.insert(0, str(Path('..').resolve()))
 
 N_SAMPLES = 5000
 # squigglepy uses its own RNG; np.random.seed has no effect on sq sampling

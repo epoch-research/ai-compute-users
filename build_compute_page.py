@@ -9,7 +9,7 @@ Each bar's tooltip (and the bar itself) links to its walkthrough section;
 OpenAI's 2023-24 bars, which have no separate trace, link to the OpenAI
 end-2025 section since they are per-year outputs of the same power model.
 
-The page is a pure view over the two tables from generate_tables — the same
+The page is a pure view over the two tables from generate_lab_compute_tables — the same
 data as the exported CSVs — so it picks up new steps or snapshots added to
 MODEL_STEPS in the frontier script (plus their LAB_YEAR_KEYS entry) with no
 changes to the viz code. Styled on the Epoch website palette, with a dark
@@ -29,7 +29,7 @@ import datetime
 import json
 from pathlib import Path
 
-from generate_tables import get_all_tables, LAB_YEAR_KEYS
+from generate_lab_compute_tables import get_all_tables, LAB_YEAR_KEYS
 
 HERE = Path(__file__).resolve().parent
 OUT_PATH = HERE / "index.html"
@@ -486,7 +486,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
 <div class="tooltip" id="tip-step" role="tooltip"></div>
 
 <script>
-// ── Data (injected by build_compute_page.py from generate_tables) ───────────
+// ── Data (injected by build_compute_page.py from generate_lab_compute_tables) ───────────
 const DATA = __DATA_JSON__;
 const YEAR_END = DATA.yearEnd;
 

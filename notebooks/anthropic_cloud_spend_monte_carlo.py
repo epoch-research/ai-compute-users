@@ -47,6 +47,7 @@
 import contextlib
 import io
 import runpy
+import sys
 import warnings
 from pathlib import Path
 
@@ -54,6 +55,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import squigglepy as sq
+
+# Shared modules (lab_compute_utils, epoch_data) live at the repo root, one
+# level up from notebooks/.
+sys.path.insert(0, str(Path('..').resolve()))
 
 N_SAMPLES = 5000
 sq.set_seed(42)  # squigglepy has its own RNG; np.random.seed does not affect it

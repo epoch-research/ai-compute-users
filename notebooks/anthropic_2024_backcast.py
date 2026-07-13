@@ -47,7 +47,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import squigglepy as sq
 
-sys.path.insert(0, str(Path('.').resolve()))
+# The frontier script lives at the repo root, one level up from notebooks/.
+sys.path.insert(0, str(Path('..').resolve()))
 import frontier_lab_compute_model as frontier
 
 N_SAMPLES = 5000
@@ -421,4 +422,4 @@ plt.show()
 #   doubt an explicit parameter — left as an open decision.
 # - **Promotion path:** priors into `lab_model_params.csv` (year-dimensioned), a
 #   per-year return in the frontier script's `model_anthropic`, and an extra
-#   (Anthropic × 2024) row in `lab_compute_tables`.
+#   (Anthropic × 2024) row in the `generate_lab_compute_tables.py` exports.
