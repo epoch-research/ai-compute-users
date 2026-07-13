@@ -159,7 +159,8 @@ model in the frontier script).
 python3.11 build_compute_page.py
 ```
 
-regenerates `index.html`, one self-contained page in the Epoch website style
+regenerates `lab_compute_page_draft.html`, one self-contained page in the
+Epoch website style
 holding both views of the data: a grouped bar chart of the year-end estimates
 (median bars, 90%-CI whiskers, collapsible data table), and one walkthrough
 section per (lab × year-end) snapshot showing every intermediate quantity in

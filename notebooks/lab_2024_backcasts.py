@@ -312,5 +312,5 @@ plt.show()
 #   `lab_model_params.csv` (`*_2024` rows), the models in the frontier script
 #   (section 5), and `generate_lab_compute_tables.py` exports the extra (lab × year) rows in
 #   both tables and the consolidated page (`build_compute_page.py` →
-#   `index.html`). Anthropic's backcast deliberately stays notebook-only —
+#   `lab_compute_page_draft.html`). Anthropic's backcast deliberately stays notebook-only —
 #   promote it the same way if it should ship.

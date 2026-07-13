@@ -1,16 +1,16 @@
 """build_compute_page.py — Consolidated chart + model-walkthrough page (draft)
 
 Renders the frontier-lab compute estimates as one self-contained page,
-index.html: the grouped bar chart (median bars, 90%-CI whiskers, one bar per
-lab per year-end) on top, and one model-walkthrough section per (lab ×
+lab_compute_page_draft.html: the grouped bar chart (median bars, 90%-CI
+whiskers, one bar per lab per year-end) on top, and one model-walkthrough section per (lab ×
 year-end) snapshot below — every intermediate quantity in model order, drawn
 as a median dot with a capped 90%-CI whisker on a full-width track.
 Each bar's tooltip (and the bar itself) links to its walkthrough section;
 OpenAI's 2023-24 bars, which have no separate trace, link to the OpenAI
 end-2025 section since they are per-year outputs of the same power model.
 
-The page is a pure view over the two tables from generate_lab_compute_tables — the same
-data as the exported CSVs — so it picks up new steps or snapshots added to
+The page is a pure view over the two tables from generate_lab_compute_tables —
+the same data as the exported CSVs — so it picks up new steps or snapshots added to
 MODEL_STEPS in the frontier script (plus their LAB_YEAR_KEYS entry) with no
 changes to the viz code. Styled on the Epoch website palette, with a dark
 theme keyed off prefers-color-scheme (a data-theme attribute on <html>
@@ -32,7 +32,7 @@ from pathlib import Path
 from generate_lab_compute_tables import get_all_tables, LAB_YEAR_KEYS
 
 HERE = Path(__file__).resolve().parent
-OUT_PATH = HERE / "index.html"
+OUT_PATH = HERE / "lab_compute_page_draft.html"
 
 
 def _round(v):
