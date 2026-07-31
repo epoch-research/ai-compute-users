@@ -456,7 +456,7 @@ show('END-2024 H100e (backcast)', h100e_backcast)
 # "what the money should have bought" and "what the power model says Anthropic
 # had", carried back one year at the fitted spending ratio.
 #
-# The backcast's median runs ~1.25× the headline's — equivalently, it implies
+# The backcast's median runs ~1.23× the headline's — equivalently, it implies
 # Anthropic effectively paid ~\$1.55/H100e-hr in 2024, inside (if below the
 # median of) the \$1.50–2.50 sticker prior. So the cross-check brackets the
 # headline from above rather than contradicting it; an earlier revision mixed
@@ -912,8 +912,8 @@ plt.show()
 # %% [markdown]
 # ## Takeaways
 #
-# **Part A (canonical end-2024):** ~209k H100e (90% CI ~148k–292k) from the
-# direct conversion; the experimental power backcast lands ~1.24× higher and
+# **Part A (canonical end-2024):** ~206k H100e (90% CI ~141k–297k) from the
+# direct conversion; the experimental power backcast lands ~1.23× higher and
 # brackets it from above.
 #
 # **Part B (end-2025 cross-check):**

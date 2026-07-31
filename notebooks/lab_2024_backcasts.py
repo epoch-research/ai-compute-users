@@ -285,7 +285,7 @@ plt.show()
 #   power data. The `anthropic_cloud_spend_2024` notebook documents the
 #   assumptions (smooth exponential spend, around-the-clock billing at the
 #   effective 2024 rate) and an experimental power-model backcast whose median
-#   runs ~1.26× this one — kept non-canonical, bracketing the headline from
+#   runs ~1.23× this one — kept non-canonical, bracketing the headline from
 #   above.
 # - **OpenAI's numbers move with the in-flight openai-notebook work** (the
 #   current tree's end-2025 CI is wider than the 7/2 docs); this notebook always
