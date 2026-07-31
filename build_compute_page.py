@@ -29,7 +29,7 @@ import datetime
 import json
 from pathlib import Path
 
-from generate_lab_compute_tables import get_all_tables, LAB_YEAR_KEYS
+from generate_lab_compute_tables import get_all_tables, LAB_YEAR_KEYS, MID_YEAR_SNAPSHOTS
 
 HERE = Path(__file__).resolve().parent
 OUT_PATH = HERE / "lab_compute_page_draft.html"
@@ -46,7 +46,7 @@ def build_payload():
     tables = get_all_tables()
 
     year_end = [
-        dict(lab=r.Lab, year=int(r.Year),
+        dict(lab=r.Lab, year=int(r.Year), mid=(r.Lab, int(r.Year)) in MID_YEAR_SNAPSHOTS,
              p5=round(r.h100e_p5), med=round(r.h100e_med), p95=round(r.h100e_p95))
         for r in tables["year_end_by_lab"].itertuples()
     ]
@@ -62,7 +62,8 @@ def build_payload():
                  p5=_round(r.value_p5), med=_round(r.value_med), p95=_round(r.value_p95))
             for r in rows.itertuples()
         ]
-        labs.append(dict(lab=lab, year=year, steps=steps))
+        labs.append(dict(lab=lab, year=year,
+                         mid=(lab, year) in MID_YEAR_SNAPSHOTS, steps=steps))
 
     return dict(generated=f"{datetime.datetime.now():%Y-%m-%d %H:%M}",
                 yearEnd=year_end, labs=labs)
@@ -111,6 +112,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
     --c-google-deepmind: #00A5A6;
     --c-anthropic: #6A3ECB;
     --c-meta-superintelligence-labs: #FC6538;
+    --c-spacexai: #24343B;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -128,9 +130,11 @@ PAGE_TEMPLATE = r"""<!doctype html>
       --tip-shadow: rgba(0, 0, 0, 0.45);
       --chip-hover: #132931;
       /* Dark variants validated against the dark card surface: purple raised,
-         orange deepened; pink and teal are on-brand unchanged. */
+         orange deepened; pink and teal are on-brand unchanged. SpaceXAI's
+         near-black flips to a light slate so bars stay visible. */
       --c-anthropic: #7B4FD8;
       --c-meta-superintelligence-labs: #F25322;
+      --c-spacexai: #AEBDC4;
     }
   }
   :root[data-theme="dark"] {
@@ -237,10 +241,12 @@ PAGE_TEMPLATE = r"""<!doctype html>
   .lab-google-deepmind { fill: var(--c-google-deepmind); }
   .lab-anthropic { fill: var(--c-anthropic); }
   .lab-meta-superintelligence-labs { fill: var(--c-meta-superintelligence-labs); }
+  .lab-spacexai { fill: var(--c-spacexai); }
   .bg-openai { background: var(--c-openai); }
   .bg-google-deepmind { background: var(--c-google-deepmind); }
   .bg-anthropic { background: var(--c-anthropic); }
   .bg-meta-superintelligence-labs { background: var(--c-meta-superintelligence-labs); }
+  .bg-spacexai { background: var(--c-spacexai); }
 
   .chart-footnote {
     font-size: 12px; line-height: 1.5; color: var(--muted);
@@ -319,6 +325,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
   .sec-google-deepmind { --lab: var(--c-google-deepmind); }
   .sec-anthropic { --lab: var(--c-anthropic); }
   .sec-meta-superintelligence-labs { --lab: var(--c-meta-superintelligence-labs); }
+  .sec-spacexai { --lab: var(--c-spacexai); }
 
   .group { border-top: 1px solid var(--hairline); padding: 10px 0 12px; margin-top: 12px; }
   .group:first-of-type { border-top: none; }
@@ -423,8 +430,11 @@ PAGE_TEMPLATE = r"""<!doctype html>
       H100&#8209;equivalents, from Epoch&rsquo;s frontier-lab compute Monte Carlo models.
       Bars show the median estimate; whiskers span the 90% credible interval.
       <b>Hover or click a bar</b> to see how that estimate is built, step by step.
-      2024 values for Google DeepMind and Meta are backcasts covering the predecessor
-      frontier-AI orgs (Meta Superintelligence Labs did not exist in 2024).
+      2024 values are backcasts (Google DeepMind and Meta cover the predecessor
+      frontier-AI orgs &mdash; Meta Superintelligence Labs did not exist in 2024;
+      Anthropic&rsquo;s converts reported cloud spend at 2024 prices). The 2026
+      group is SpaceXAI at June 30, net of the Colossus capacity SpaceX sells to
+      Anthropic, Google, and Reflection AI.
     </p>
   </header>
 
@@ -432,7 +442,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
     <div class="legend" id="legend"></div>
     <div class="chart-scroll">
       <svg id="chart" viewBox="0 0 860 430" role="img"
-           aria-label="Grouped bar chart of frontier lab compute at end of 2023, 2024 and 2025, in H100 equivalents, with 90 percent credible intervals. Each bar links to a walkthrough of its model."></svg>
+           aria-label="Grouped bar chart of frontier lab compute from end of 2023 through mid-2026, in H100 equivalents, with 90 percent credible intervals. Each bar links to a walkthrough of its model."></svg>
     </div>
     <details class="datatable">
       <summary>Data table</summary>
@@ -440,7 +450,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
         <table class="values" id="values-table">
           <caption>H100-equivalents; 90% credible interval bounds. Snapshots, not flows &mdash; years must not be summed.</caption>
           <thead>
-            <tr><th scope="col">Lab</th><th scope="col">Year-end</th><th scope="col">5th pct</th><th scope="col">Median</th><th scope="col">95th pct</th></tr>
+            <tr><th scope="col">Lab</th><th scope="col">Snapshot</th><th scope="col">5th pct</th><th scope="col">Median</th><th scope="col">95th pct</th></tr>
           </thead>
           <tbody></tbody>
         </table>
@@ -449,16 +459,18 @@ PAGE_TEMPLATE = r"""<!doctype html>
     <p class="chart-footnote">
       Estimates are operational-stock snapshots of compute rented or used (not owned) &mdash;
       consecutive years must not be summed. Missing bars mean &ldquo;no estimate&rdquo;, not zero:
-      Anthropic&rsquo;s end-2024 backcast is not exported, and 2023 covers OpenAI only.
+      2023 covers OpenAI only, and the 2026 group covers SpaceXAI only (a June 30
+      snapshot, net of capacity sold to other labs).
     </p>
   </section>
 
   <section class="walkthrough-head" id="walkthrough">
     <h2>How each estimate is built</h2>
     <p>
-      Each estimate &mdash; every lab at end-2025, plus end-2024 backcasts for Google
-      DeepMind and Meta (whose 2024 scope is the predecessor org, Meta&nbsp;AI&thinsp;/&thinsp;GenAI)
-      &mdash; is a Monte Carlo combination of a few sampled inputs. Rows show every quantity
+      Each estimate &mdash; every lab at end-2025, end-2024 backcasts for Google
+      DeepMind, Meta (whose 2024 scope is the predecessor org, Meta&nbsp;AI&thinsp;/&thinsp;GenAI),
+      Anthropic, and SpaceXAI, plus SpaceXAI at mid-2026 &mdash; is a Monte Carlo
+      combination of a few sampled inputs. Rows show every quantity
       in model order: a dot at the median with a whisker spanning the 90% credible interval,
       grouped by unit onto a shared scale (5,000 samples each). Sampled inputs are priors from
       <code>lab_model_params.csv</code>; the model structure lives in
@@ -492,8 +504,11 @@ const YEAR_END = DATA.yearEnd;
 
 // Fixed lab order: sets legend order and bar order within a year group.
 // Color follows the lab everywhere, via the CSS custom properties above.
-const LAB_ORDER = ['OpenAI', 'Google DeepMind', 'Anthropic', 'Meta Superintelligence Labs'];
+const LAB_ORDER = ['OpenAI', 'Google DeepMind', 'Anthropic', 'Meta Superintelligence Labs',
+                   'SpaceXAI'];
 const slug = lab => lab.toLowerCase().replace(/[^a-z]+/g, '-');
+// Mid-year snapshots (SpaceXAI mid-2026) label as "mid-2026", not "end-2026".
+const periodLabel = d => (d.mid ? 'mid-' : 'end-') + d.year;
 
 // Walkthrough section ids that actually exist, e.g. "openai-2025".
 const SECTION_IDS = new Set(DATA.labs.map(e => `${slug(e.lab)}-${e.year}`));
@@ -507,6 +522,9 @@ function walkthroughTarget(lab, year) {
 const BACKCAST_NOTE = {
   'google-deepmind-2024': 'End-2024 backcast',
   'meta-superintelligence-labs-2024': 'End-2024 backcast · Meta AI / GenAI scope',
+  'anthropic-2024': 'End-2024 backcast · from reported cloud spend',
+  'spacexai-2024': 'End-2024 backcast',
+  'spacexai-2026': 'June 30 · net of capacity sold to Anthropic, Google, Reflection',
 };
 
 // ── Formatting ──────────────────────────────────────────────────────────────
@@ -544,7 +562,7 @@ const tbody = document.querySelector('#values-table tbody');
 for (const lab of LAB_ORDER) {
   for (const d of YEAR_END.filter(r => r.lab === lab).sort((a, b) => a.year - b.year)) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${d.lab}</td><td>${d.year}</td>` +
+    tr.innerHTML = `<td>${d.lab}</td><td>${d.mid ? 'mid-' + d.year : d.year}</td>` +
       [d.p5, d.med, d.p95].map(v => `<td>${Math.round(v).toLocaleString('en-US')}</td>`).join('');
     tbody.appendChild(tr);
   }
@@ -589,7 +607,8 @@ function showChartTip(d, bar) {
   tipChart.innerHTML =
     `<span class="swatch bg-${slug(d.lab)}" style="display:inline-block;margin-right:6px"></span>` +
     `<b>${d.lab}</b><br>` +
-    `<span class="muted">End of ${d.year}${note ? ' · ' + note.replace('End-2024 backcast', 'backcast') : ''}</span><br>` +
+    `<span class="muted">${d.mid ? 'Mid-' + d.year + ' (June 30)' : 'End of ' + d.year}` +
+    `${note ? ' · ' + note.replace('End-2024 backcast', 'backcast').replace(/^June 30 · /, '') : ''}</span><br>` +
     `Median: ${fmtH100e(d.med)} H100e<br>` +
     `<span class="muted">90% CI ${fmtH100e(d.p5)} – ${fmtH100e(d.p95)}</span><br>` +
     `<a class="tip-link" href="#${target.id}">` +
@@ -614,14 +633,23 @@ tipChart.addEventListener('click', e => {
   if (e.target.closest('a')) tipChart.style.display = 'none';
 });
 
-const groupW = plotW / YEARS.length;
-const BAR_W = 42, GAP = 10;
+// Group widths scale with how many bars each year has (2023 has one, 2024 and
+// 2025 have five), so crowded groups don't spill into their neighbors. Bars
+// shrink below their preferred width only if the full row wouldn't fit.
+const GAP = 10;
+const yearRows = YEARS.map(year => LAB_ORDER
+  .map(lab => YEAR_END.find(d => d.lab === lab && d.year === year))
+  .filter(Boolean));
+const totalBars = yearRows.reduce((n, rows) => n + rows.length, 0);
+const totalGaps = totalBars - YEARS.length;
+const BAR_W = Math.min(42, (plotW - YEARS.length * 2 * 12 - totalGaps * GAP) / totalBars);
+// Whatever width the bars don't need becomes equal padding around each group.
+const groupPad = (plotW - totalBars * BAR_W - totalGaps * GAP) / (2 * YEARS.length);
+let groupX = M.l;
 YEARS.forEach((year, gi) => {
-  const rows = LAB_ORDER
-    .map(lab => YEAR_END.find(d => d.lab === lab && d.year === year))
-    .filter(Boolean);
-  const totalW = rows.length * BAR_W + (rows.length - 1) * GAP;
-  const x0 = M.l + gi * groupW + (groupW - totalW) / 2;
+  const rows = yearRows[gi];
+  const groupW = rows.length * BAR_W + (rows.length - 1) * GAP + 2 * groupPad;
+  const x0 = groupX + groupPad;
 
   rows.forEach((d, i) => {
     const x = x0 + i * (BAR_W + GAP);
@@ -630,7 +658,7 @@ YEARS.forEach((year, gi) => {
 
     const bar = el('rect', {
       class: `bar lab-${slug(d.lab)}`, tabindex: 0, role: 'link',
-      'aria-label': `${d.lab}, end of ${d.year}: median ${fmtH100e(d.med)} H100 equivalents, ` +
+      'aria-label': `${d.lab}, ${d.mid ? 'mid' : 'end of'} ${d.year}: median ${fmtH100e(d.med)} H100 equivalents, ` +
         `90% CI ${fmtH100e(d.p5)} to ${fmtH100e(d.p95)}. View model walkthrough.`,
       x, y: y(d.med), width: BAR_W, height: y(0) - y(d.med),
     });
@@ -658,8 +686,10 @@ YEARS.forEach((year, gi) => {
        fmtH100e(d.med));
   });
 
-  el('text', { class: 'year-label', x: M.l + gi * groupW + groupW / 2, y: H - 20,
-               'text-anchor': 'middle' }, year);
+  el('text', { class: 'year-label', x: groupX + groupW / 2, y: H - 20,
+               'text-anchor': 'middle' },
+     rows.length && rows.every(d => d.mid) ? `mid-${year}` : year);
+  groupX += groupW;
 });
 
 // ── Walkthrough sections ────────────────────────────────────────────────────
@@ -822,7 +852,7 @@ for (const entry of DATA.labs) {
 
   const link = document.createElement('a');
   link.href = '#' + id;
-  link.innerHTML = `<span class="swatch bg-${labSlug}"></span>${entry.lab} &middot; end-${entry.year}`;
+  link.innerHTML = `<span class="swatch bg-${labSlug}"></span>${entry.lab} &middot; ${periodLabel(entry)}`;
   nav.appendChild(link);
 
   const section = document.createElement('section');
@@ -836,7 +866,7 @@ for (const entry of DATA.labs) {
   header.innerHTML =
     `<span class="swatch bg-${labSlug}"></span>` +
     `<h3>${entry.lab}</h3>` +
-    (final ? `<span class="headline">end-${entry.year}: <b>${fmtVal('H100e', final.med)}</b>` +
+    (final ? `<span class="headline">${periodLabel(entry)}: <b>${fmtVal('H100e', final.med)}</b>` +
              ` H100e (90% CI ${fmtVal('H100e', final.p5)}&ndash;${fmtVal('H100e', final.p95)})</span>`
            : '') +
     (note ? `<span class="badge">${note}</span>` : '') +

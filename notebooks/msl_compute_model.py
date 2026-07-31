@@ -220,13 +220,13 @@ cloud_spend_samples = cloud_spend @ N_SAMPLES  # $B/yr
 # Rental price per H100e-hour, anchored on SemiAnalysis InferenceX (August
 # 2025 pricing surveys, https://inferencex.semianalysis.com/inference):
 # GB200 $3.30/GPU-hr and GB300 $3.96/GPU-hr, both
-# ~2.5 H100e per GPU, so the GB200–GB300 range gives a 90% CI of $1.32–1.58
-# per H100e-hour.
-# - InferenceX labels these "TCO" but the dashboard is set to 3-year rental
-#   prices; Meta's deals run 5–6 years, so 3-year pricing is only a proxy.
+# ~2.5 H100e per GPU, so the GB200–GB300 range gives $1.32–1.58 per
+# H100e-hour. Shaded down to a 90% CI of $1.20–1.50: InferenceX quotes 3-year
+# rental prices, while Meta's deals run 5–6 years and Meta is a very large
+# customer — both should buy a discount.
 # - Pricing on very large cloud deals spiked in spring 2026 (e.g. the SpaceX
 #   deals), but that repricing postdates Meta's fall-2025 contracts.
-price_per_h100e_hour = sq.to(3.30 / 2.5, 3.96 / 2.5)
+price_per_h100e_hour = sq.to(1.20, 1.50)
 
 rented_h100e = (cloud_spend_samples * 1e9
                 / ((price_per_h100e_hour @ N_SAMPLES) * HOURS_PER_YEAR))

@@ -16,6 +16,7 @@ import pandas as pd
 
 CHIP_SALES_URL = "https://epoch.ai/data/ai_chip_sales.zip"
 CHIP_OWNERS_URL = "https://epoch.ai/data/ai_chip_owners.zip"
+DATA_CENTERS_URL = "https://epoch.ai/data/data_centers/data_centers.zip"
 CACHE_DIR = Path(__file__).resolve().parent / ".cache"
 
 # The published CSVs renamed a few columns relative to the exports the models
@@ -50,6 +51,15 @@ def load_chip_sales_cumulative(manufacturer):
     df = df[df["Chip manufacturer"] == manufacturer].copy()
     df = df.rename(columns=_SALES_RENAMES)
     df["End date"] = pd.to_datetime(df["End date"])
+    return df
+
+
+def load_data_center_timelines():
+    """Dated construction/capacity milestones per data center, from Epoch's
+    AI Data Centers data: one row per (data center, date) with the estimated
+    operational H100e, IT power, and construction status at that date."""
+    df = _read_csv_from_zip(DATA_CENTERS_URL, "data_center_timelines.csv")
+    df["Date"] = pd.to_datetime(df["Date"])
     return df
 
 

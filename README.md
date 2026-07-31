@@ -2,8 +2,8 @@
 
 Estimates of the compute quantities used by major AI players: Monte Carlo
 models of frontier labs' compute (Google DeepMind, Meta Superintelligence
-Labs, OpenAI, Anthropic) in H100-equivalents (H100e), plus Alphabet-level
-activity estimates.
+Labs, OpenAI, Anthropic, SpaceXAI) in H100-equivalents (H100e), plus
+Alphabet-level activity estimates.
 
 Split out of [epoch-research/ai-chip-counts](https://github.com/epoch-research/ai-chip-counts)
 (its `ai-lab-compute/` directory, history preserved).
@@ -21,7 +21,9 @@ The repo has two layers that share one set of priors:
   land in the `.ipynb`. Commit both files.
 - **The estimate script** (`frontier_lab_compute_model.py`, repo root) — the
   consolidated, importable versions of the same models: end-2025 estimates for
-  the four labs plus the end-2024 backcasts for Google DeepMind and Meta. It
+  the five labs, the end-2024 backcasts for Google DeepMind, Meta, and
+  Anthropic, and the SpaceXAI model (end-2024, end-2025, and mid-2026,
+  anchored on Epoch's Colossus data-center capacity estimates). It
   restates no judgment priors — like the notebooks, it loads them from
   **`lab_model_params.csv`** (via `lab_compute_utils.load_lab_params()`), the
   single source of truth for the model priors. Change a prior in the sheet and
@@ -33,18 +35,20 @@ The notebooks:
 |----------|-----------|
 | `deepmind_compute_model` | Google DeepMind compute, end-2025 |
 | `msl_compute_model` | Meta Superintelligence Labs compute, end-2025 |
-| `openai_compute_monte_carlo` | OpenAI compute at year-ends 2023–2025 (power-based) |
-| `anthropic_compute_monte_carlo` | Anthropic compute, end-2025 |
-| `anthropic_cloud_spend_monte_carlo` | Anthropic compute via cloud spend (cross-check) |
+| `openai_power_model` | OpenAI compute at year-ends 2023–2025 (power-based, mainline) |
+| `anthropic_power_2025` | Anthropic compute, end-2025 (power-based, mainline) |
+| `anthropic_cloud_spend_2024` | Anthropic compute, end-2024 (canonical) + end-2025 cloud-spend cross-check |
+| `openai_cloud_spend` | OpenAI compute 2024–2025 via cloud spend (cross-check) |
 | `alphabet_level_activities_model` | Alphabet-level activity estimates |
-| `anthropic_2024_backcast` | Anthropic compute, end-2024 |
-| `lab_2024_backcasts` | Google DeepMind + Meta compute, end-2024 |
+| `lab_2024_backcasts` | End-2024 backcasts across the four labs |
+| `spacexai_compute_model` | SpaceXAI compute, end-2024 / end-2025 / mid-2026 (Colossus-anchored) |
 
 Supporting modules (repo root): `lab_compute_utils.py` (prior loader, fleet
 buildout helper), `epoch_data.py` (chip fleet data — Nvidia per-owner fleets,
-TPU and AMD cumulative sales — fetched at runtime from the
-[Epoch AI data hub](https://epoch.ai/data), cached one download per day under
-`.cache/`), and `data/` (hand-maintained inputs; see `data/README.md`).
+TPU and AMD cumulative sales — plus data-center capacity timelines, fetched at
+runtime from the [Epoch AI data hub](https://epoch.ai/data), cached one
+download per day under `.cache/`), and `data/` (hand-maintained inputs; see
+`data/README.md`).
 
 ## Table exports
 
@@ -96,11 +100,13 @@ H100e converts each chip at its dense 8-bit peak FLOP/s divided by the H100's
 owned), at the stated moment in time — they are operational-stock snapshots,
 not flows, so consecutive years must not be summed.
 
-The 2024 rows for Google DeepMind and Meta are backcasts. They keep the same
-`Lab` labels for continuity, but "the lab" in 2024 means *frontier-AI compute
-at the company*: Meta Superintelligence Labs did not exist in 2024 (its
-predecessor was Meta AI / GenAI plus FAIR), and the backcast share priors are
-for those predecessor scopes — see `notebooks/lab_2024_backcasts.ipynb`.
+The 2024 rows for Google DeepMind, Meta, and Anthropic are backcasts. They
+keep the same `Lab` labels for continuity, but "the lab" in 2024 means
+*frontier-AI compute at the company*: Meta Superintelligence Labs did not
+exist in 2024 (its predecessor was Meta AI / GenAI plus FAIR), and the
+backcast share priors are for those predecessor scopes — see
+`notebooks/lab_2024_backcasts.ipynb`. Anthropic's 2024 row converts reported
+cloud spend at 2024 prices (`notebooks/anthropic_cloud_spend_2024.ipynb`).
 
 ### Schema — `intermediates_by_lab`
 
@@ -128,19 +134,23 @@ Each snapshot's `final` row equals its `year_end_by_lab` row (tested).
 
 ### Coverage
 
-| Lab | Year-ends |
+| Lab | Snapshots |
 |-----|-----------|
 | OpenAI | 2023, 2024, 2025 |
-| Anthropic | 2025 |
+| Anthropic | 2024, 2025 |
 | Google DeepMind | 2024, 2025 |
 | Meta Superintelligence Labs | 2024, 2025 |
+| SpaceXAI | 2024, 2025, mid-2026 |
 
-OpenAI's power model yields a snapshot per disclosed year-end; DeepMind and
-Meta add end-2024 backcast models. Anthropic's end-2024 backcast lives in
-`notebooks/anthropic_2024_backcast.ipynb` and is deliberately not exported.
+OpenAI's power model yields a snapshot per disclosed year-end; DeepMind, Meta,
+and Anthropic add end-2024 backcast models (Anthropic's converts reported
+cloud spend at 2024 prices; an experimental power-model backcast stays
+notebook-only in `notebooks/anthropic_cloud_spend_2024.ipynb`).
 Rows are omitted (not zero-padded) where no model exists — treat a missing
-(lab, year) as "no estimate", not zero. xAI is not covered (no Monte Carlo
-model in the frontier script).
+(lab, year) as "no estimate", not zero. SpaceXAI's 2026 row is dated June 30
+(not Dec 31) and is net of the Colossus capacity SpaceX sells to Anthropic,
+Google, and Reflection AI — its 2024/2025 rows have no such subtraction
+because the sale agreements all start May–July 2026.
 
 ### Caveats for downstream use
 

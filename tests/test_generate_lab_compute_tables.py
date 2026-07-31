@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from generate_lab_compute_tables import (get_all_tables, LAB_ORDER, LAB_YEAR_KEYS, COLUMNS,
-                             INTERMEDIATE_COLUMNS)
+                             INTERMEDIATE_COLUMNS, MID_YEAR_SNAPSHOTS)
 
 TRACKED_LABS = set(LAB_ORDER)
 VALID_KINDS = {"input", "constant", "derived", "final"}
@@ -49,17 +49,23 @@ def test_openai_covers_every_disclosed_year_end(table):
     assert openai_years == {2023, 2024, 2025}
 
 
-def test_end_2024_backcasts_cover_deepmind_and_meta_but_not_anthropic(table):
+def test_every_tracked_lab_has_an_end_2024_row(table):
     labs_2024 = set(table.loc[table["Year"] == 2024, "Lab"])
-    assert labs_2024 == {"OpenAI", "Google DeepMind", "Meta Superintelligence Labs"}
+    assert labs_2024 == TRACKED_LABS
 
 
 def test_one_row_per_lab_year(table):
     assert not table.duplicated(subset=["Lab", "Year"]).any()
 
 
-def test_dates_are_year_ends(table):
-    assert (table["Date"] == table["Year"].astype(str) + "-12-31").all()
+def test_dates_are_year_ends_except_declared_mid_year_snapshots(table):
+    for row in table.itertuples():
+        expected = MID_YEAR_SNAPSHOTS.get((row.Lab, row.Year), f"{row.Year}-12-31")
+        assert row.Date == expected, f"{row.Lab} {row.Year}: {row.Date} != {expected}"
+    # SpaceXAI's 2026 snapshot is June 30 and its Name says "mid", not "end".
+    spacexai_2026 = table[(table["Lab"] == "SpaceXAI") & (table["Year"] == 2026)]
+    assert spacexai_2026["Date"].iloc[0] == "2026-06-30"
+    assert spacexai_2026["Name"].iloc[0] == "SpaceXAI mid-2026"
 
 
 def test_percentiles_are_ordered_and_positive(table):

@@ -19,9 +19,7 @@
 # Anthropic discloses nothing directly, so we start from one outside anchor: the
 # leaked OpenAI internal memo, which put Anthropic at about **1.4 GW of compute
 # online at the end of 2025** (roughly 75% of OpenAI's own 1.9 GW). We treat that
-# as the *mainline* power figure and bound its uncertainty with the memo's own
-# logic: OpenAI was confident its **1.9 GW** exceeded Anthropic's, which caps the
-# high end near 1.8 GW (see §4).
+# as the *mainline* power figure with a 90% CI of **1.0–1.9 GW** (see §4).
 #
 # The hard part is turning gigawatts into **H100-equivalents (H100e)**, which
 # depends on the chip mix. Anthropic's fleet is Trainium2-heavy, with the rest
@@ -94,7 +92,7 @@ lab_params_table('anthropic')
 # %% [markdown]
 # ## 1. Borrow the Nvidia specs and the H100:GB200 ratio from the OpenAI model
 #
-# Two things come straight from `openai_compute_monte_carlo.py` so the two
+# Two things come straight from `openai_power_model.py` so the two
 # notebooks stay consistent:
 #
 # - **Per-chip specs** for the Nvidia parts — IT watts per GPU and H100e per GPU.
@@ -110,7 +108,7 @@ lab_params_table('anthropic')
 def load_openai_namespace():
     """Execute the OpenAI notebook script and hand back its variables, without
     letting its own prints or charts render here."""
-    oai_path = 'openai_compute_monte_carlo.py'
+    oai_path = 'openai_power_model.py'
     original_show = plt.show
     plt.show = lambda *args, **kwargs: None  # swallow the OpenAI figures
     try:
@@ -275,21 +273,23 @@ print(f'Trainium2:                          {trainium2_per_mw:,.0f} H100e/MW')
 # ## 4. Total power: the OpenAI memo's 1.4 GW
 #
 # The 1.4 GW figure comes from an OpenAI internal memo that was confident its own
-# **1.9 GW** exceeded Anthropic's capacity. We use that context to bound the
-# estimate rather than reaching for a wide prior: the **upper end is ~1.8 GW** —
-# just under OpenAI's 1.9, since Anthropic is unlikely to be higher if OpenAI
-# believed it was ahead — and the median stays on the memo's **1.4 GW**. The lower
-# bound then follows, because a lognormal's median is the geometric mean of its 90%
-# bounds: left = 1.4² / 1.8 ≈ **1.09 GW**. So the 90% range is about **1.09–1.8 GW**.
+# **1.9 GW** exceeded Anthropic's capacity. The 90% CI is **1.0–1.9 GW**, whose
+# geometric mean (~1.38) keeps the lognormal's median essentially on the memo's
+# **1.4 GW**.
 #
-# One residual risk this band does not fully cover: if the 1.4 GW were *facility*
-# power rather than IT power, true IT power would be ~30% lower (~1.0 GW), below
-# this floor.
+# An earlier revision capped the top end at 1.8 GW — just under OpenAI's 1.9,
+# since Anthropic is unlikely to be higher if OpenAI believed it was ahead. That
+# cap was dropped (7/30): OpenAI's 1.9 GW is itself uncertain in our own OpenAI
+# model (definition, accuracy, rounding), so "Anthropic at 1.9" is compatible
+# with OpenAI staying ahead — that world simply implies an even larger OpenAI.
+# The implied correlation between the two labs' power draws is not modeled
+# directly. The lower end drops to 1.0 GW, which also covers most of the risk
+# that the 1.4 GW was *facility* rather than IT power (~30% lower, ~1.0 GW).
 
 # %%
-# Upper bound 1.8 GW (OpenAI's 1.9 was believed to be ahead); left bound set so the
-# lognormal median lands on the memo's 1.4 GW (median = geometric mean of bounds).
-lab_power_gw = PARAMS['lab_power_gw']  # 90% CI ≈ 1.09–1.8 GW, median 1.4
+# 90% CI 1.0-1.9 GW; the geometric mean of the bounds (~1.38) keeps the
+# lognormal median essentially on the memo's 1.4 GW.
+lab_power_gw = PARAMS['lab_power_gw']  # 90% CI 1.0–1.9 GW, median ~1.38
 power_samples_mw = (lab_power_gw @ N_SAMPLES) * 1000.0
 
 lo, mid, hi = percentiles(power_samples_mw)
@@ -442,12 +442,60 @@ for name, samples in decomposition.items():
     print(f'   {name:26s}: {fmt(lo)} / {fmt(mid)} / {fmt(hi)}')
 
 # %% [markdown]
-# ## 8. Takeaways
+# ## 8. Sensitivity sweep: Trainium2 share from 10% to 90%
+#
+# §5 put a prior on the Trainium2 share. Here we drop that prior and instead fix
+# the share at each value from 10% to 90%, with only the power draw still sampled —
+# an explicit answer to "how wrong could the headline be if the mix evidence is
+# wrong?"
+#
+# The lever is shallow, because a watt of Trainium2 buys about 0.75× the H100e of
+# a non-Trainium watt: sliding the share across the whole 10–90% band moves the
+# median total far less than the power uncertainty does. The top of the band is
+# also physically implausible — at the median 1.4 GW, a very high share implies
+# more Trainium2 chips than Amazon's entire ~1.4M deployment ("fully
+# subscribed", and Anthropic is not the sole customer).
+
+# %%
+sweep_shares = np.round(np.arange(0.10, 0.901, 0.10), 2)
+sweep_h100e = {share: anthropic_h100e(power_samples_mw, share) for share in sweep_shares}
+
+fig, ax = plt.subplots(figsize=(11, 5))
+ax.boxplot([sweep_h100e[share] / 1e6 for share in sweep_shares], showfliers=False, widths=0.55)
+ax.set_xticks(range(1, len(sweep_shares) + 1))
+ax.set_xticklabels([f'{share:.0%}' for share in sweep_shares])
+ax.axhline(h_mid / 1e6, color='#888780', ls='--', lw=1.4,
+           label=f'headline median {fmt(h_mid)} (share prior, §5)')
+ax.set_xlabel('Trainium2 share of IT power (fixed)')
+ax.set_ylabel('End-2025 total H100e (millions)')
+ax.set_title('End-2025 compute by fixed Trainium2 share (power still sampled)', fontsize=12)
+ax.legend()
+ax.grid(True, alpha=0.3, axis='y')
+plt.tight_layout()
+plt.show()
+
+print('End-2025 H100e by fixed Trainium2 share (5th / median / 95th; median implied chips):')
+for share in sweep_shares:
+    lo, mid, hi = percentiles(sweep_h100e[share])
+    # Implied Trainium2 chip count at the median power draw, for the §6 ceiling check.
+    implied_chips = share * float(np.median(power_samples_mw)) * 1e6 / TRAINIUM2_IT_WATTS
+    ceiling_note = '  — breaches Amazon\'s 1.4M-chip ceiling' if implied_chips > 1.4e6 else ''
+    print(f'   {share:>4.0%}: {fmt(lo)} / {fmt(mid)} / {fmt(hi)}   (~{fmt(implied_chips)} chips{ceiling_note})')
+
+low_end_median = float(np.median(sweep_h100e[sweep_shares[0]]))
+high_end_median = float(np.median(sweep_h100e[sweep_shares[-1]]))
+headline_median = float(np.median(anthropic_h100e_samples))
+print(f'\nFull 10%→90% sweep moves the median from {fmt(low_end_median)} (10% share) to '
+      f'{fmt(high_end_median)} (90% share): {low_end_median / headline_median - 1:+.0%} to '
+      f'{high_end_median / headline_median - 1:+.0%} vs the headline median {fmt(headline_median)}')
+
+# %% [markdown]
+# ## 9. Takeaways
 #
 # - **Headline: Anthropic had roughly 1.2M H100e online at end-2025**, with a 90%
-#   interval of about **0.95M–1.55M** — centered in the research summary's "≥1M,
-#   likely <1.5M" range, though the upper tail now pokes just past 1.5M; ~70% of
-#   OpenAI's ~1.8M.
+#   interval of about **0.85M–1.64M** — centered in the research summary's "≥1M,
+#   likely <1.5M" range, with tails now poking past it on both sides after the
+#   7/30 power-prior widening; ~68% of OpenAI's ~1.74M.
 # - **The estimate rests on two inputs: total power and the Trainium2 share.** The
 #   share prior (median ~52%, 90% CI 35–70%) is anchored on the site power in
 #   Epoch's data-center directory — New Carlisle ~626 MW at end-2025 plus Madison
@@ -455,8 +503,9 @@ for name, samples in decomposition.items():
 #   ~845k Anthropic Trainium2 chips at the median, between the New Carlisle-only
 #   (~720k) and +Madison (~1.05M) anchors, with ~1% of draws breaching Amazon's
 #   1.4M-chip ceiling.
-# - **Power is the larger source of spread** — its ~1.09–1.8 GW band moves H100e
-#   about five times as much as the share prior does. Tightening the power figure
-#   is the highest-leverage way to narrow the estimate.
+# - **Power is the larger source of spread** — its 1.0–1.9 GW band moves H100e
+#   several times as much as the share prior does, and even pinning the share
+#   anywhere from 10% to 90% (§8) only moves the median about ±10%. Tightening the
+#   power figure is the highest-leverage way to narrow the estimate.
 # - **Nvidia and TPU are interchangeable here** — within a few percent on H100e per
 #   watt (native-peak basis), so the non-Trainium split does not affect the total.

@@ -14,39 +14,42 @@
 # ---
 
 # %% [markdown]
-# # OpenAI compute Monte Carlo
+# # OpenAI power model
 #
-# Turns the single medians of `archive/openai_power_model.ipynb` into full distributions
-# by sampling the six main sources of uncertainty together:
+# **The mainline OpenAI estimate.** OpenAI's disclosed IT power per year (200 /
+# 600 / 1,900 MW) is converted into H100-equivalents through Microsoft's chip
+# deployment mix, sampling the five main sources of uncertainty together:
 #
-# 1. **`new_chip_share`** — the chip-mix knob. The share of OpenAI's power placed
-#    on the *newest* year's deployment mix; the rest follows the *default*
-#    vintage-layered mix. At 0 the fleet is the default mix; at 1 it is entirely
-#    the latest mix.
-# 2. **Deployment lag** — Nvidia books revenue when chips ship; they go live some
+# 1. **Deployment lag** — Nvidia books revenue when chips ship; they go live some
 #    quarters later. The lag controls which Microsoft snapshot each year reads.
-# 3. **Power definition factor** — is each disclosed figure IT power or gross
-#    (facility) power? One shared multiplier: 80% chance it's already IT (a small
-#    residual band around 1.0), 20% chance it's gross (divided by a 1.1–1.7
+# 2. **Power definition factor** — is each disclosed figure IT power or gross
+#    (facility) power? One shared multiplier: 90% chance it's already IT (a small
+#    residual band around 1.0), 10% chance it's gross (divided by a 1.1–1.7
 #    datacenter PUE, a downward haircut). This is the gap between the disclosed
 #    number and effective IT power, and it can only pull the total down.
-# 4. **Rounding jitter** — each disclosure is reported to the nearest 0.1 GW, so
+# 3. **Rounding jitter** — each disclosure is reported to the nearest 0.1 GW, so
 #    the true value sits within ±50 MW. Modeled as a triangular peaked at 0, since
 #    the exact edges are less likely. Same band for every year, so 2025 (1.9 GW)
 #    is the most precise in relative terms and 2023 (0.2 GW) the least.
-# 5. **IT overhead factor** — watts per GPU is server power times an IT overhead
+# 4. **IT overhead factor** — watts per GPU is server power times an IT overhead
 #    (networking, storage, management). We vary that overhead: median 1.14, 5th–95th
 #    ~1.0–1.35, floored at 1.0 (from the Colossus data-center calculations). Higher
 #    overhead means fewer chips per disclosed MW, so it moves the total both ways —
 #    a low overhead is the model's main upside lever.
-# 6. **Figure accuracy** — is OpenAI's internal total-power number itself right,
+# 5. **Figure accuracy** — is OpenAI's internal total-power number itself right,
 #    setting aside rounding and the IT-vs-gross question? Undercounted providers
 #    or newly-online capacity push the true figure up; overstatement pushes it
 #    down. One shared draw, 90% range 0.9–1.2 (median ~1.04, a mild upward lean).
 #
-# H100e per GPU is still held fixed. With `new_chip_share = 0`, lag = 0, nominal
-# power, and the median IT overhead, the model reproduces the deterministic
-# `archive/openai_power_model.ipynb` reference.
+# The chip mix itself is *not* sampled: the model assumes OpenAI gets all of its
+# compute through long-term contracts, so capacity keeps the chip mix it was
+# deployed with and is never refreshed to newer chips. Section 7 stress-tests
+# that assumption with a `new_chip_share` knob that refreshes part of the fleet
+# to the newest mix — plausible values barely move the headline total.
+#
+# H100e per GPU is still held fixed. The canonical version of this model lives
+# in `frontier_lab_compute_model.py` (`model_openai`), with priors in
+# `lab_model_params.csv`; this notebook is the walkthrough.
 
 # %%
 import sys
@@ -183,11 +186,14 @@ print('Disclosed power (MW):  ', {d.strftime('%Y'): int(p) for d, p in disclosed
 # fleet from it:
 #
 # - **default** — vintage-layered: each year's added power keeps the mix Microsoft
-#   was deploying then, and carries forward. This is the main model.
-# - **newest** — the entire fleet placed on the most recent year's mix.
+#   was deploying then, and carries forward. This is the main model: long-term
+#   contracts mean capacity is never refreshed to newer chips.
+# - **newest** — the entire fleet placed on the most recent year's mix. Only used
+#   by the section 7 stress test, where `new_chip_share` blends the two (the main
+#   model runs with it at 0).
 #
-# `new_chip_share` blends the two. The chosen mix is then scaled by OpenAI's
-# total power to get megawatts per chip, then chip counts, then H100e.
+# The chosen mix is then scaled by OpenAI's total power to get megawatts per
+# chip, then chip counts, then H100e.
 #
 # The **deployment lag** shifts the dates at which we read Microsoft's fleet.
 # Because Microsoft's data is quarterly, we just interpolate its cumulative power
@@ -249,11 +255,13 @@ def chip_power_shares(lag_quarters):
     return default_shares, newest_shares
 
 
-def run_monte_carlo(new_chip_share, lag_quarters, total_power, it_overhead):
+def run_monte_carlo(lag_quarters, total_power, it_overhead, new_chip_share=0.0):
     """Per-year, per-chip chip counts and H100e for the given parameter samples
     (each argument is a length-N array; total_power is a {date: array} dict).
     Watts per GPU = server power per GPU x it_overhead, one shared overhead per
-    sample; a higher overhead means fewer chips bought per disclosed MW."""
+    sample; a higher overhead means fewer chips bought per disclosed MW.
+    new_chip_share stays at 0 (the pure vintage-layered fleet) except in the
+    section 7 stress test, which blends toward the newest mix."""
     default_shares, newest_shares = chip_power_shares(lag_quarters)
     results = {}
     for date in OPENAI_DATES:
@@ -283,12 +291,9 @@ for lag in [0.0, 1.0, 2.0]:
 # %% [markdown]
 # ## 3. Parameters and sampling
 #
-# - **`new_chip_share`** — baseline prior `Beta(2,6)` (mean 0.25): most capacity
-#   sits on longer contracts that don't refresh to the newest chips. Section 6
-#   sweeps alternatives.
 # - **Deployment lag** — lognormal, 90% range 0.5–2 quarters (median 1).
 # - **Power definition factor** — is each disclosed figure IT power or gross?
-#   80% IT (a small residual band around 1.0), 20% gross (divided by a 1.1–1.7
+#   90% IT (a small residual band around 1.0), 10% gross (divided by a 1.1–1.7
 #   PUE). One shared draw across years, since it reflects how OpenAI reports.
 # - **Rounding jitter** — triangular ±50 MW per year, peaked at 0 (the 0.1 GW
 #   rounding step; the exact edges are less likely than a flat band).
@@ -299,7 +304,6 @@ for lag in [0.0, 1.0, 2.0]:
 #   down. One shared draw, like the definition factor.
 
 # %%
-new_chip_share_prior = PARAMS['new_chip_share']
 lag_prior = PARAMS['lag_quarters']
 
 # Is each disclosed figure IT power, or gross (facility) power? P_GROSS is the
@@ -333,29 +337,26 @@ def sample_total_power(n):
     }
 
 
-# Central values, used to hold a parameter still while isolating another (section 5).
-new_chip_share_central = float(np.median(new_chip_share_prior @ 20000))
+# Central value, used to hold the lag still while isolating another source (section 6).
 lag_central = 1.0  # geometric mean of the 0.5–2.0 quarter range
 
-print(f'new_chip_share central (median): {new_chip_share_central:.2f}')
 print(f'deployment lag central (median): {lag_central:.2f} quarters')
 
 # %% [markdown]
 # ## 4. Run the Monte Carlo
 #
-# All six inputs vary together, so each sample is one coherent scenario.
+# All five inputs vary together, so each sample is one coherent scenario.
 
 # %%
-new_chip_share = new_chip_share_prior @ N_SAMPLES
 lag_quarters = lag_prior @ N_SAMPLES
 total_power = sample_total_power(N_SAMPLES)
 it_overhead = IT_OVERHEAD @ N_SAMPLES
 
-mc = run_monte_carlo(new_chip_share, lag_quarters, total_power, it_overhead)
+mc = run_monte_carlo(lag_quarters, total_power, it_overhead)
 
-# Deterministic reference: new_chip_share 0, no lag, nominal power, median overhead = the main model.
+# Deterministic reference: no lag, nominal power, median overhead = the main model.
 reference = run_monte_carlo(
-    np.array([0.0]), np.array([0.0]), {d: np.array([disclosed_power_mw[d]]) for d in OPENAI_DATES},
+    np.array([0.0]), {d: np.array([disclosed_power_mw[d]]) for d in OPENAI_DATES},
     np.array([OVERHEAD_MEDIAN]))
 reference_h100e = {d: reference[d]['total_h100e'][0] for d in OPENAI_DATES}
 
@@ -414,7 +415,6 @@ plt.show()
 # the spread in the latest-year total belongs to just that source.
 
 # %%
-central_share = np.full(N_SAMPLES, new_chip_share_central)
 central_lag = np.full(N_SAMPLES, lag_central)
 central_overhead = np.full(N_SAMPLES, OVERHEAD_MEDIAN)
 nominal_power = {d: np.full(N_SAMPLES, disclosed_power_mw[d]) for d in OPENAI_DATES}
@@ -431,11 +431,10 @@ definition_jitter_power = {
 }
 
 decomposition = {
-    'new_chip_share only': run_monte_carlo(new_chip_share, central_lag, nominal_power, central_overhead),
-    'deployment lag only': run_monte_carlo(central_share, lag_quarters, nominal_power, central_overhead),
-    'power definition (+ jitter) only': run_monte_carlo(central_share, central_lag, definition_jitter_power, central_overhead),
-    'IT overhead only': run_monte_carlo(central_share, central_lag, nominal_power, it_overhead),
-    'figure accuracy only': run_monte_carlo(central_share, central_lag, accuracy_only_power, central_overhead),
+    'deployment lag only': run_monte_carlo(lag_quarters, nominal_power, central_overhead),
+    'power definition (+ jitter) only': run_monte_carlo(central_lag, definition_jitter_power, central_overhead),
+    'IT overhead only': run_monte_carlo(central_lag, nominal_power, it_overhead),
+    'figure accuracy only': run_monte_carlo(central_lag, accuracy_only_power, central_overhead),
     'all combined': mc,
 }
 
@@ -462,13 +461,20 @@ for name in sources:
     print(f'   {name:30s}: {fmt(lo)} / {fmt(mid)} / {fmt(hi)}')
 
 # %% [markdown]
-# ## 7. Sensitivity to the `new_chip_share` prior
+# ## 7. Stress test: what if the fleet does refresh to newer chips?
 #
-# Re-run the full Monte Carlo (lag and power still varying, reusing the same
-# samples) under each candidate prior.
+# The main model assumes OpenAI gets all of its compute through long-term
+# contracts: capacity keeps the chip mix it was deployed with and is never
+# refreshed to the newest chips (`new_chip_share = 0`). Here we stress-test that
+# assumption. `new_chip_share` is the share of OpenAI's power placed on the
+# *newest* year's deployment mix instead of the vintage-layered one; each
+# candidate prior below re-runs the full Monte Carlo (lag and power still
+# varying, reusing the same samples) with the fleet partly refreshed. The first
+# entry hardcodes 0 — effectively the real model.
 
 # %%
 priors = {
+    '0 — main model': sq.const(0.0),
     'Beta(2,18) — mean 0.10': sq.beta(2, 18),
     'Beta(2,6) — mean 0.25': sq.beta(2, 6),
     'Beta(2,2) — mean 0.50': sq.beta(2, 2),
@@ -477,7 +483,8 @@ priors = {
 }
 
 prior_h100e = {
-    name: run_monte_carlo(prior @ N_SAMPLES, lag_quarters, total_power, it_overhead)[last_date]['total_h100e']
+    name: run_monte_carlo(lag_quarters, total_power, it_overhead,
+                          new_chip_share=prior @ N_SAMPLES)[last_date]['total_h100e']
     for name, prior in priors.items()
 }
 
@@ -487,7 +494,7 @@ ax.set_xticks(range(1, len(priors) + 1))
 ax.set_xticklabels([n.replace(' — ', '\n') for n in priors], fontsize=8)
 ax.axhline(reference_h100e[last_date] / 1e6, color='#888780', ls='--', lw=1.4, label='main-model reference')
 ax.set_ylabel(f'{last_date.strftime("%Y")} total H100e (millions)')
-ax.set_title('Latest-year compute by new_chip_share prior (full uncertainty)', fontsize=12)
+ax.set_title('Stress test: latest-year compute by new_chip_share prior (full uncertainty)', fontsize=12)
 ax.legend()
 ax.grid(True, alpha=0.3, axis='y')
 plt.tight_layout()
@@ -501,12 +508,14 @@ for name in priors:
 # %% [markdown]
 # ## 8. Sensitivity to the gross-vs-IT split
 #
-# The power definition factor assumes a 20% chance each disclosed figure is gross
-# (facility) power rather than IT. That split is a judgment call, so here we sweep
-# it: from 0% (always IT — the factor collapses to the tight residual band at 1.0)
-# up to 80% gross. More gross probability puts more weight on the 1/PUE haircut,
-# which pulls the total down and fattens its lower tail. `new_chip_share` and lag
-# keep varying (reusing the same samples); only the gross weight changes.
+# The power definition factor assumes a 10% chance each disclosed figure is gross
+# (facility) power rather than IT (lowered from 20% on 7/30: the ambiguity was
+# making OpenAI's CI nearly as wide as Anthropic's despite OpenAI's much harder
+# power anchor). That split is a judgment call, so here we sweep it: from 0%
+# (always IT — the factor collapses to the tight residual band at 1.0) up to 80%
+# gross. More gross probability puts more weight on the 1/PUE haircut, which
+# pulls the total down and fattens its lower tail. The lag keeps varying
+# (reusing the same samples); only the gross weight changes.
 
 # %%
 def total_power_with_gross_prob(n, p_gross):
@@ -523,9 +532,9 @@ def total_power_with_gross_prob(n, p_gross):
     }
 
 
-gross_probs = [0.0, 0.2, 0.5, 0.8]
+gross_probs = [0.0, 0.1, 0.2, 0.5, 0.8]
 gross_h100e = {
-    p: run_monte_carlo(new_chip_share, lag_quarters, total_power_with_gross_prob(N_SAMPLES, p), it_overhead)[last_date]['total_h100e']
+    p: run_monte_carlo(lag_quarters, total_power_with_gross_prob(N_SAMPLES, p), it_overhead)[last_date]['total_h100e']
     for p in gross_probs
 }
 
@@ -551,14 +560,16 @@ for p in gross_probs:
 #
 # - The biggest driver of total-compute uncertainty is the **power definition
 #   factor** — it scales the whole fleet, so its spread flows almost directly into
-#   the H100e total. Unlike the other knobs it is one-sided: the 20% chance a
+#   the H100e total. Unlike the other knobs it is one-sided: the 10% chance a
 #   figure is gross rather than IT pulls a downward tail, so the interval is
 #   asymmetric (more room below the median than above).
-# - **`new_chip_share`** and the **deployment lag** move the total only modestly
-#   (the fleet is already mostly newest-vintage), but they are what reshape the
-#   **chip composition** — A100 vs. Blackwell share.
-# - Even sweeping the `new_chip_share` prior across its full range leaves the
-#   total in a fairly narrow band, so the headline number is robust; the chip mix
-#   is where the assumptions bite.
+# - The **deployment lag** moves the total only modestly (the fleet is already
+#   mostly newest-vintage), but it is what reshapes the **chip composition** —
+#   A100 vs. Blackwell share.
+# - The section 7 stress test backs the all-long-term-contracts assumption:
+#   even priors that refresh most of the fleet to the newest chip mix leave the
+#   total in a fairly narrow band around the main model, so hardcoding
+#   `new_chip_share = 0` costs little on the headline number; the chip mix is
+#   where the assumption bites.
 # - Natural next addition: let watts per GPU vary, which feeds both the mix and
 #   the power-to-chip conversion.

@@ -1,6 +1,6 @@
 # Monte Carlo compute models: Google DeepMind, Meta SL, OpenAI, Anthropic
 
-Describes the four lab-level Monte Carlo models estimating **end-2025 compute in H100-equivalents (H100e)**. **This is a prose artifact, not a source of truth**: the canonical judgment priors live in `lab_model_params.csv` (read by the per-lab notebooks and `frontier_lab_compute_model.py` alike), and the notebooks (`deepmind_compute_model`, `msl_compute_model`, `openai_compute_monte_carlo`, `anthropic_compute_monte_carlo`) hold the detailed walkthroughs and sensitivity sweeps. Where this document disagrees with the sheet or the code, trust the sheet and the code. Values below are as of **2026-07-02**.
+Describes the four lab-level Monte Carlo models estimating **end-2025 compute in H100-equivalents (H100e)**. **This is a prose artifact, not a source of truth**: the canonical judgment priors live in `lab_model_params.csv` (read by the per-lab notebooks and `frontier_lab_compute_model.py` alike), and the notebooks (`deepmind_compute_model`, `msl_compute_model`, `openai_power_model`, `anthropic_power_2025`) hold the detailed walkthroughs and sensitivity sweeps. Where this document disagrees with the sheet or the code, trust the sheet and the code. Values below are as of **2026-07-02**.
 
 ## Shared conventions
 
@@ -9,7 +9,7 @@ Describes the four lab-level Monte Carlo models estimating **end-2025 compute in
 | H100e definition | chip's dense 8-bit peak FLOP/s ÷ 1.979e15 | H100 dense FP8 spec is the denominator |
 | Input distributions | lognormal unless noted | `sq.to(low, high)` bounds = **90% credible interval** (5th–95th pct); median ≈ geometric mean of bounds |
 | Samples / seed | 5,000 / seed 42 (squigglepy) | |
-| Canonical model choice | **power-based** models for OpenAI and Anthropic | cloud-spend analyses (`anthropic_cloud_spend_monte_carlo`, gpu-hour model) deliberately excluded from the canonical script |
+| Canonical model choice | **power-based** models for OpenAI and Anthropic | cloud-spend analyses (`anthropic_cloud_spend_2024` part B, gpu-hour model) deliberately excluded from the canonical script |
 | Ownership data basis | "sold" stock from AI Chip Owners/Sales dashboards | converted to operational stock via a deployment-lag ratio |
 
 The four models fall into two families. DeepMind and MSL are **top-down allocations**: owned fleet × deployment lag × lab share. OpenAI and Anthropic are **power-based**: disclosed/leaked IT power × a chip mix converting MW to H100e.

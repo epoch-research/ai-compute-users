@@ -44,15 +44,17 @@ HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "data"
 
 # Row order within a year (the frontier script's presentation order).
-LAB_ORDER = ["Google DeepMind", "Meta Superintelligence Labs", "OpenAI", "Anthropic"]
+LAB_ORDER = ["Google DeepMind", "Meta Superintelligence Labs", "OpenAI", "Anthropic",
+             "SpaceXAI"]
 
 # Each modelled snapshot's key in the frontier module's MODEL_STEPS trace
 # registry, in presentation order: lab-major, headline end-2025 before the
 # end-2024 backcast. OpenAI's 2023/2024 year-ends fall out of model_openai()
-# itself and record no separate trace; Anthropic's end-2024 backcast lives in
-# anthropic_2024_backcast and is deliberately not exported here. The 2024
-# Meta rows keep the "Meta Superintelligence Labs" label for continuity, but
-# cover the predecessor org (Meta AI / GenAI — MSL did not exist in 2024).
+# itself and record no separate trace. Anthropic's end-2024 row is the
+# cloud-spend conversion (model_anthropic_2024); the experimental power-model
+# backcast stays notebook-only in anthropic_cloud_spend_2024. The 2024 Meta rows
+# keep the "Meta Superintelligence Labs" label for continuity, but cover the
+# predecessor org (Meta AI / GenAI — MSL did not exist in 2024).
 LAB_YEAR_KEYS = {
     ("Google DeepMind", 2025): "deepmind",
     ("Google DeepMind", 2024): "deepmind_2024",
@@ -60,7 +62,23 @@ LAB_YEAR_KEYS = {
     ("Meta Superintelligence Labs", 2024): "msl_2024",
     ("OpenAI", 2025): "openai",
     ("Anthropic", 2025): "anthropic",
+    ("Anthropic", 2024): "anthropic_2024",
+    ("SpaceXAI", 2025): "spacexai_2025",
+    ("SpaceXAI", 2024): "spacexai_2024",
+    ("SpaceXAI", 2026): "spacexai_h1_2026",
 }
+
+# Snapshots dated mid-year rather than Dec 31. SpaceXAI's 2026 snapshot is
+# June 30 (net of the Colossus capacity sold to Anthropic/Google/Reflection —
+# the sales all start May-July 2026, so an end-2026 read would be stale).
+MID_YEAR_SNAPSHOTS = {("SpaceXAI", 2026): "2026-06-30"}
+
+
+def snapshot_name(lab, year):
+    """Display name for one (lab, year) snapshot, e.g. "OpenAI end-2025" or
+    "SpaceXAI mid-2026"."""
+    period = "mid" if (lab, year) in MID_YEAR_SNAPSHOTS else "end"
+    return f"{lab} {period}-{year}"
 
 COLUMNS = ["Name", "Lab", "Year", "Date",
            "h100e_p5", "h100e_med", "h100e_p95", "Notes"]
@@ -70,8 +88,8 @@ COLUMNS = ["Name", "Lab", "Year", "Date",
 def run_lab_samples():
     """Run the lab Monte Carlos and return H100e sample arrays keyed by
     (lab, year). OpenAI contributes one snapshot per disclosed year-end
-    (2023-2025); DeepMind and Meta get end-2025 plus the end-2024 backcast;
-    Anthropic is end-2025 only.
+    (2023-2025); DeepMind, Meta, and Anthropic get end-2025 plus the end-2024
+    backcast.
 
     Per-snapshot percentiles of these arrays are valid, but the models share
     one RNG stream (each reseeds 42), so per-sample values are artificially
@@ -86,6 +104,11 @@ def run_lab_samples():
     samples[("Meta Superintelligence Labs", 2025)] = flc.model_msl()
     samples[("Meta Superintelligence Labs", 2024)] = flc.model_msl_2024()
     samples[("Anthropic", 2025)] = flc.model_anthropic(openai)
+    samples[("Anthropic", 2024)] = flc.model_anthropic_2024()
+    spacexai = flc.model_spacexai()
+    samples[("SpaceXAI", 2024)] = spacexai["2024"]
+    samples[("SpaceXAI", 2025)] = spacexai["2025"]
+    samples[("SpaceXAI", 2026)] = spacexai["h1_2026"]  # June 30, net of sales
     return samples
 
 
@@ -108,10 +131,10 @@ def build_year_end_table(samples):
     for (lab, year) in sorted(samples, key=lambda k: (k[1], LAB_ORDER.index(k[0]))):
         p5, med, p95 = np.percentile(samples[(lab, year)], [5, 50, 95])
         rows.append({
-            "Name": f"{lab} end-{year}",
+            "Name": snapshot_name(lab, year),
             "Lab": lab,
             "Year": year,
-            "Date": f"{year}-12-31",
+            "Date": MID_YEAR_SNAPSHOTS.get((lab, year), f"{year}-12-31"),
             "h100e_p5": p5,
             "h100e_med": med,
             "h100e_p95": p95,
@@ -140,7 +163,7 @@ def build_intermediates_table(steps_by_lab_year):
             else:
                 p5, med, p95 = np.percentile(samples, [5, 50, 95])
             rows.append({
-                "Name": f"{lab} end-{year} · {s['label']}",
+                "Name": f"{snapshot_name(lab, year)} · {s['label']}",
                 "Lab": lab,
                 "Year": year,
                 "Step": order,

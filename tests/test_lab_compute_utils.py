@@ -33,15 +33,17 @@ def check_lab_params_loader():
     """Sanity checks for the canonical parameter sheet and its loader."""
     params = load_lab_params()
 
-    expected_labs = {'deepmind', 'msl', 'openai', 'anthropic', 'alphabet_activities'}
+    expected_labs = {'deepmind', 'msl', 'openai', 'anthropic', 'alphabet_activities',
+                     'spacexai'}
     assert expected_labs <= set(params), f"missing labs: {expected_labs - set(params)}"
 
     sq.set_seed(1234)
     msl_share = params['msl']['msl_share'] @ 2000
     assert (msl_share >= 0.1).all() and (msl_share <= 0.9).all(), 'msl_share clips not applied'
 
-    new_chip = params['openai']['new_chip_share'] @ 2000
-    assert 0.15 < np.mean(new_chip) < 0.35, 'Beta(2, 6) mean should be ~0.25'
+    # new_chip_share was removed from the sheet (the openai notebook's stress
+    # test builds its own local distributions).
+    assert 'new_chip_share' not in params['openai'], 'new_chip_share should not be in the sheet'
 
     assert params['openai']['p_gross'] == 0.2, 'const rows should load as plain floats'
 
@@ -54,13 +56,24 @@ def check_lab_params_loader():
     share = params['alphabet_activities']['compute_share'] @ 5000
     assert share.max() <= 1.0, 'compute_share rclip=1 not applied'
 
+    # SpaceXAI's uniform cloud-sale priors stay inside their stated bounds.
+    spillover = params['spacexai']['anthropic_c2_spillover'] @ 2000
+    assert spillover.min() >= 0 and spillover.max() <= 95000, \
+        'anthropic_c2_spillover should stay in [0, 95k]'
+
     # Shared hardware constants load as plain floats from the chip_specs rows.
     chip_specs = params['chip_specs']
     expected_specs = {'tpu_v5e_tdp', 'tpu_v5p_tdp', 'tpu_v6e_tdp', 'tpu_v7_tdp',
                       'tpu_it_overhead', 'trainium2_ref_h100e', 'trainium2_ref_it_mw'}
     assert expected_specs <= set(chip_specs), f"missing chip specs: {expected_specs - set(chip_specs)}"
-    assert all(isinstance(value, float) for value in chip_specs.values()), \
-        'chip_specs rows should all be const (plain floats)'
+    # All chip_specs rows are const floats except nvidia_it_overhead, which is
+    # sampled (a `to` row, the server-power -> IT-power overhead, floored at 1).
+    assert all(isinstance(value, float) for name, value in chip_specs.items()
+               if name != 'nvidia_it_overhead'), \
+        'chip_specs rows other than nvidia_it_overhead should be const (plain floats)'
+    overhead = chip_specs['nvidia_it_overhead'] @ 2000
+    assert overhead.min() >= 1.0 and 1.05 < np.median(overhead) < 1.25, \
+        'nvidia_it_overhead should sample >= 1.0 with median ~1.14'
 
     # Each call must build fresh objects so sensitivity cells get clean copies.
     assert params['msl']['msl_share'] is not load_lab_params()['msl']['msl_share']

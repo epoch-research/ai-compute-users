@@ -17,19 +17,20 @@
 # # End-2024 compute backcasts for the four frontier labs
 #
 # Extends the end-2025 Monte Carlo estimates one year back, and compares the two
-# years. The Google DeepMind and Meta backcasts are **canonical** (promoted
-# 2026-07-10): their judgment priors live in `lab_model_params.csv` (the `*_2024`
-# rows) and the model structure in `frontier_lab_compute_model.py` section 5
-# (`model_deepmind_2024`, `model_msl_2024`), exported by `generate_lab_compute_tables.py`
-# alongside the end-2025 rows. This notebook is the walkthrough and cross-lab
-# comparison — it restates no priors.
+# years. The Google DeepMind, Meta, and Anthropic backcasts are **canonical**
+# (DeepMind/Meta promoted 2026-07-10, Anthropic 2026-07-30): their judgment
+# priors live in `lab_model_params.csv` and the model structure in
+# `frontier_lab_compute_model.py` section 5 (`model_deepmind_2024`,
+# `model_msl_2024`, `model_anthropic_2024`), exported by
+# `generate_lab_compute_tables.py` alongside the end-2025 rows. This notebook is
+# the walkthrough and cross-lab comparison — it restates no priors.
 #
 # | Lab | End-2024 method | Status |
 # |---|---|---|
 # | OpenAI | canonical power model, 600 MW disclosure (already per-year) | canonical (frontier script) |
 # | Google DeepMind | owned fleet × data-driven deployment lag × **single** DM share | canonical (frontier script) |
 # | Meta AI (pre-MSL) | owned fleet × data-driven deployment lag × frontier share | canonical (frontier script) |
-# | Anthropic | spend-curve backcast, imported from `anthropic_2024_backcast` | notebook-only, not exported |
+# | Anthropic | end-2024 cloud-spend rate ÷ 2024 price per H100e-hour | canonical (frontier script) |
 #
 # **Definitional convention:** "the lab" in 2024 means *frontier-AI compute at the
 # company*. Meta Superintelligence Labs did not exist in 2024 — its predecessor
@@ -38,11 +39,7 @@
 # those predecessor scopes.
 
 # %%
-import contextlib
-import io
-import runpy
 import sys
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -78,11 +75,10 @@ def show(label, samples):
 # %% [markdown]
 # ## 0. Anchors from the canonical frontier script
 #
-# Every distribution in this notebook comes from a canonical script: the
-# frontier models each reseed the global squigglepy stream internally, so they
-# reproduce their canonical runs regardless of cell order, and this notebook
-# draws no samples of its own. (The Anthropic backcast script, executed in
-# section 5, seeds its own stream too.)
+# Every distribution in this notebook comes from the canonical frontier
+# script: the models each reseed the global squigglepy stream internally, so
+# they reproduce their canonical runs regardless of cell order, and this
+# notebook draws no samples of its own.
 
 # %%
 openai_res = frontier.model_openai()
@@ -220,36 +216,20 @@ for name in ['nvidia_owned', 'google_owned', 'operational', 'total_h100e']:
     show(dm_steps[name]['label'], dm_steps[name]['samples'])
 
 # %% [markdown]
-# ## 5. Anthropic, end-2024 — imported from `anthropic_2024_backcast`
+# ## 5. Anthropic, end-2024 — the cloud-spend conversion
 #
-# Anthropic's backcast has its own notebook, `anthropic_2024_backcast.py`
-# (consolidating what was §9 of the cloud-spend notebook and an earlier version
-# of this section). The model in one line: start from the power-anchored
-# end-2025 fleet and shrink it twice — once because Anthropic was spending less
-# at the end of 2024 (~0.37x the end-2025 rate), and once because each 2024
-# dollar bought less compute (~0.56x). See that notebook for the printed and
-# charted intermediates, the SemiAnalysis cross-checks, and the factor
-# decomposition. Here we just execute it quietly and import the samples.
+# No power anchor exists for Anthropic's 2024, so the canonical model converts
+# cloud spending directly: the reported annual totals (\$2.5B in 2024, \$6.8B
+# in 2025) pin an exponential spend curve, whose height at the year boundary
+# (the end-2024 spending *rate*, ~\$3.6B/yr) is divided by the effective 2024
+# price of an H100e-hour billed around the clock (~\$1.95). The walkthrough —
+# the growth-shape prior and its SemiAnalysis/WSJ cross-checks, the price
+# evidence, and an experimental power-model backcast deliberately kept
+# non-canonical — lives in `anthropic_cloud_spend_2024.py`.
 
 # %%
-def load_anthropic_2024():
-    """Execute the Anthropic backcast notebook script and return its end-2024
-    samples, without letting its prints or charts render here."""
-    path = 'anthropic_2024_backcast.py'
-    original_show = plt.show
-    plt.show = lambda *args, **kwargs: None
-    try:
-        with contextlib.redirect_stdout(io.StringIO()), warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            namespace = runpy.run_path(path)
-    finally:
-        plt.show = original_show
-        plt.close('all')
-    return namespace['anthropic_2024']
-
-
-anthropic_2024 = load_anthropic_2024()
-show('ANTHROPIC H100e (imported)', anthropic_2024)
+anthropic_2024 = frontier.model_anthropic_2024()
+show('ANTHROPIC H100e (canonical)', anthropic_2024)
 
 # %% [markdown]
 # ## 6. Results: the four labs, end-2024 vs end-2025
@@ -301,10 +281,12 @@ plt.show()
 #   uncertainty isn't propagated, only the level (fleet lognormals) and the lag.
 # - **Owned-fleet CIs sum per-chip percentile bounds** (perfect-correlation
 #   assumption, generous widths); the Meta AMD slice adds a rough share prior.
-# - **Anthropic is imported from `anthropic_2024_backcast`**, which documents
-#   its assumptions (a time-stable power-vs-spend correction, smooth exponential
-#   spend) and the SemiAnalysis cross-checks pointing to its lower half
-#   (~190–230k).
+# - **Anthropic rests on reported spend and a price prior** — no fleet or
+#   power data. The `anthropic_cloud_spend_2024` notebook documents the
+#   assumptions (smooth exponential spend, around-the-clock billing at the
+#   effective 2024 rate) and an experimental power-model backcast whose median
+#   runs ~1.26× this one — kept non-canonical, bracketing the headline from
+#   above.
 # - **OpenAI's numbers move with the in-flight openai-notebook work** (the
 #   current tree's end-2025 CI is wider than the 7/2 docs); this notebook always
 #   reports the current canonical script.

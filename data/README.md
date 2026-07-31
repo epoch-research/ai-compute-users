@@ -11,7 +11,7 @@ Hand-maintained inputs:
 - `IT power by chip.csv` — per-GPU IT power for Nvidia chips (canonical location
   per CLAUDE.md; TPU/Trainium power specs live in `../lab_model_params.csv` as
   `chip_specs` rows). Read by `frontier_lab_compute_model.py` and
-  `openai_compute_monte_carlo`.
+  `openai_power_model`.
 - `lab IT power.csv` — OpenAI's disclosed IT power by date. Read by the same two.
 
 Chip fleet data (Nvidia per-owner fleets, TPU and AMD cumulative sales) is no

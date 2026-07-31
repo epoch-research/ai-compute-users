@@ -1,26 +1,31 @@
 """Consolidated frontier-lab compute Monte Carlo.
 
-One master script holding the model structure and results for four labs'
+One master script holding the model structure and results for five labs'
 end-2025 compute, in H100-equivalents (H100e):
 
-    Google DeepMind, Meta Superintelligence Labs (MSL), OpenAI, Anthropic
+    Google DeepMind, Meta Superintelligence Labs (MSL), OpenAI, Anthropic,
+    SpaceXAI
 
 The sampled priors live in lab_model_params.csv (loaded via
 lab_compute_utils.load_lab_params) — the single source of truth shared with the
 lab notebooks. This file holds only model structure. Each lab keeps the
 canonical model from its own notebook; the detailed walkthroughs,
 visualizations, and sensitivity sweeps live in the individual notebooks
-(deepmind_compute_model, msl_compute_model, openai_compute_monte_carlo,
-anthropic_compute_monte_carlo) and are intentionally not reproduced here.
+(deepmind_compute_model, msl_compute_model, openai_power_model,
+anthropic_power_2025, spacexai_compute_model) and are intentionally
+not reproduced here.
 
-For OpenAI and Anthropic the *power-based* model is canonical; the cloud-spend
-analyses are deliberately excluded.
+For the OpenAI and Anthropic end-2025 estimates the *power-based* model is
+canonical; the cloud-spend analyses are deliberately excluded. (Anthropic's
+end-2024 is the exception: no power anchor exists for it, so its canonical
+model converts cloud spending directly.)
 
 Besides the end-2025 headline models, section 5 holds end-2024 backcasts for
-Google DeepMind and Meta AI (pre-MSL), promoted from the lab_2024_backcasts
-notebook. OpenAI's end-2024 falls out of model_openai() (its power series is
-per-year); Anthropic's backcast stays in anthropic_2024_backcast and is
-deliberately not promoted here.
+Google DeepMind, Meta AI (pre-MSL), and Anthropic. OpenAI's end-2024 falls out
+of model_openai() (its power series is per-year). Section 6 holds the SpaceXAI model, which
+produces three snapshots at once (end-2024, end-2025, and mid-2026) from
+Epoch's dated Colossus capacity estimates; the mid-2026 snapshot nets out the
+capacity SpaceX sells to other labs.
 
 Each model also records the intermediate quantities behind its final
 distribution in MODEL_STEPS (pure bookkeeping, no effect on results), which
@@ -43,7 +48,8 @@ HERE = Path(__file__).resolve().parent
 
 sys.path.insert(0, str(HERE))  # so sibling modules resolve from any cwd
 from lab_compute_utils import load_lab_params
-from epoch_data import load_nvidia_owners_cumulative, load_chip_sales_cumulative
+from epoch_data import (load_nvidia_owners_cumulative, load_chip_sales_cumulative,
+                        load_data_center_timelines)
 
 # Each model reseeds 42 so it reproduces its canonical notebook run. Side
 # effect: the labs share one RNG stream, so per-sample values are artificially
@@ -163,12 +169,13 @@ def model_msl():
     msl_owned = operational * msl_share
 
     # Rented cloud, no deployment-lag haircut (billed as delivered). Spend run
-    # rate ($B/yr) buys H100e at an uncertain price per H100e-hour: GB200-GB300
-    # 3-year rental range, both ~2.5 H100e per GPU (see the notebook's caveats
-    # on 3- vs 5-6-year pricing and the spring-2026 large-deal repricing).
+    # rate ($B/yr) buys H100e at an uncertain price per H100e-hour: the
+    # GB200-GB300 3-year rental range ($1.32-1.58), shaded down to $1.20-1.50
+    # because Meta's deals run 5-6 years and Meta is a large customer (see the
+    # notebook's caveats).
     cloud_spend = sq.zero_inflated(P["cloud_p_nothing_online"],
                                    P["cloud_spend_run_rate"]) @ N_SAMPLES
-    price_per_h100e_hour = sq.to(3.30 / 2.5, 3.96 / 2.5) @ N_SAMPLES
+    price_per_h100e_hour = sq.to(1.20, 1.50) @ N_SAMPLES
     rented_h100e = cloud_spend * 1e9 / (price_per_h100e_hour * 8760)
     msl_h100e = msl_owned + rented_h100e
 
@@ -198,13 +205,13 @@ def model_msl():
 # 3. OpenAI (power-based model)
 # ---------------------------------------------------------------------------
 # Turns OpenAI's disclosed IT power per year into H100e via Microsoft's chip
-# deployment mix. The fleet is built two ways from that mix -- "default"
-# (vintage-layered: each year's added power keeps the mix deployed then) and
-# "newest" (whole fleet on the latest year's mix) -- and new_chip_share blends
-# them. Six sampled inputs: new_chip_share, deployment lag (which Microsoft
-# snapshot each year reads), a power definition factor (IT vs gross), a
-# figure-accuracy factor (is the internal number itself right), rounding jitter,
-# and an IT overhead factor (server power -> IT power per GPU).
+# deployment mix. The fleet is vintage-layered: each year's added power keeps
+# the mix Microsoft was deploying then and carries forward -- OpenAI's capacity
+# comes through long-term contracts, so it isn't refreshed to newer chips (the
+# openai notebook stress-tests this assumption). Five sampled inputs: deployment
+# lag (which Microsoft snapshot each year reads), a power definition factor
+# (IT vs gross), a figure-accuracy factor (is the internal number itself right),
+# rounding jitter, and an IT overhead factor (server power -> IT power per GPU).
 
 QUARTER_DAYS = 365.25 / 4
 OAI_CHIP_TYPES = ["A100", "H100/H200", "B200", "B300"]
@@ -271,9 +278,10 @@ def _load_openai_data():
 
 
 def _chip_power_shares(data, lag_quarters):
-    """For each OpenAI year, the share of power on each chip under a deployment lag.
-    Returns (default_shares, newest_shares) as {date: {chip: share}}; lag_quarters
-    may be a scalar or a per-sample array (shares come back the same shape)."""
+    """For each OpenAI year, the share of power on each chip under a deployment lag,
+    as a {date: {chip: share}} dict (vintage-layered: each year's additions keep
+    their deployment mix and carry forward). lag_quarters may be a scalar or a
+    per-sample array (shares come back the same shape)."""
     dates, ms_power = data["dates"], data["ms_power"]
     added_power = data["added"]
     start = ms_power.index[0]
@@ -300,17 +308,15 @@ def _chip_power_shares(data, lag_quarters):
         tot = sum(add.values())
         added_mix[d] = {c: add[c] / tot for c in OAI_CHIP_TYPES}
 
-    # Default carries each year's additions forward at their own mix; newest puts
-    # the whole fleet on the latest year's mix.
-    default_shares, newest_shares = {}, {}
+    # Carry each year's additions forward at their own mix.
+    shares = {}
     carried = {c: 0.0 for c in OAI_CHIP_TYPES}
     for d in dates:
         for c in OAI_CHIP_TYPES:
             carried[c] = carried[c] + added_power[d] * added_mix[d][c]
         carried_tot = sum(carried.values())
-        default_shares[d] = {c: carried[c] / carried_tot for c in OAI_CHIP_TYPES}
-        newest_shares[d] = added_mix[d]
-    return default_shares, newest_shares
+        shares[d] = {c: carried[c] / carried_tot for c in OAI_CHIP_TYPES}
+    return shares
 
 
 def model_openai():
@@ -323,11 +329,9 @@ def model_openai():
     server_ppg = data["server_power_per_gpu"]
     dates, last_date = data["dates"], data["last_date"]
 
-    # Sampled inputs. new_chip_share blends the vintage-layered mix toward the
-    # newest year's mix; the lag shifts which Microsoft snapshot each year reads.
+    # Sampled inputs. The lag shifts which Microsoft snapshot each year reads.
     _params = load_lab_params()
     P = _params["openai"]
-    new_chip_share = P["new_chip_share"] @ N_SAMPLES
     lag_quarters = P["lag_quarters"] @ N_SAMPLES
     # Watts per GPU = server power x a shared IT overhead factor (server -> IT power);
     # a higher overhead means fewer chips per disclosed MW. Its low end is the upside.
@@ -352,15 +356,14 @@ def model_openai():
         for d in dates
     }
 
-    default_shares, newest_shares = _chip_power_shares(data, lag_quarters)
-    # Chip counts at every disclosed year-end, not just the latest: each year
-    # blends that year's two mixes and sizes the result by that year's power.
+    shares = _chip_power_shares(data, lag_quarters)
+    # Chip counts at every disclosed year-end, not just the latest: each year's
+    # mix is sized by that year's power.
     counts_by_date = {}
     for d in dates:
         counts_by_date[d] = {}
         for c in OAI_CHIP_TYPES:
-            share = (1 - new_chip_share) * default_shares[d][c] + new_chip_share * newest_shares[d][c]
-            megawatts = total_power[d] * share
+            megawatts = total_power[d] * shares[d][c]
             counts_by_date[d][c] = megawatts * 1e6 / (server_ppg[c] * it_overhead)
     counts = counts_by_date[last_date]
     total_h100e_by_date = {
@@ -377,8 +380,6 @@ def model_openai():
         step("total_power", "Modelled end-2025 IT power", total_power[last_date],
              "MW", "derived",
              "(disclosed_power + rounding jitter) × definition_factor × accuracy_factor"),
-        step("new_chip_share", "Fleet share on the newest chip mix", new_chip_share,
-             "share", "input"),
         step("lag_quarters", "Deployment lag behind Microsoft's mix", lag_quarters,
              "quarters", "input"),
         step("it_overhead", "Server-to-IT power overhead", it_overhead, "ratio", "input"),
@@ -467,8 +468,9 @@ def model_anthropic(openai_result):
     nontrainium_per_mw = (nvidia_mix_per_mw + _tpu_mix_per_mw()) / 2
     trainium2_per_mw = h100e_per_mw["Trainium2"]
 
-    # Total power: OpenAI-memo mainline 1.4 GW, upper bound ~1.8 GW (just under
-    # OpenAI's 1.9), lower bound set so the lognormal median lands on 1.4 GW.
+    # Total power: OpenAI-memo mainline 1.4 GW; 90% CI 1.0-1.9 GW (geomean
+    # ~1.38). The top end matches OpenAI's 1.9 GW point figure — allowed since
+    # OpenAI's own power is uncertain, so that world implies a larger OpenAI.
     P = load_lab_params()["anthropic"]
     power_mw = (P["lab_power_gw"] @ N_SAMPLES) * 1000.0
 
@@ -496,11 +498,11 @@ def model_anthropic(openai_result):
 
 
 # ---------------------------------------------------------------------------
-# 5. End-2024 backcasts: Google DeepMind and Meta AI (pre-MSL)
+# 5. End-2024 backcasts: Google DeepMind, Meta AI (pre-MSL), and Anthropic
 # ---------------------------------------------------------------------------
-# Same top-down shape as the end-2025 models (owned fleet x operational ratio x
-# lab share), promoted from the lab_2024_backcasts notebook, with two changes
-# in how the first two factors are obtained:
+# DeepMind and Meta share the top-down shape of the end-2025 models (owned
+# fleet x operational ratio x lab share), promoted from the lab_2024_backcasts
+# notebook, with two changes in how the first two factors are obtained:
 #
 #  - Owned fleets are read from Epoch's published quarterly estimates at
 #    end-2024, as lognormals through the summed per-chip 5th/95th columns.
@@ -637,17 +639,221 @@ def model_msl_2024():
     return meta_h100e
 
 
+def model_anthropic_2024():
+    """Anthropic at end-2024, converted directly from cloud spending. No power
+    anchor exists for 2024 (the leaked ~1.4 GW describes end-2025), so the
+    estimate turns the end-2024 *rate* of cloud spending into chips at 2024
+    contract prices: the reported annual spend totals pin an exponential spend
+    curve, whose height at the 2024/2025 boundary is divided by the annual
+    cost of one H100e billed around the clock. The walkthrough (and an
+    experimental power-model backcast deliberately NOT used here) lives in
+    notebooks/anthropic_cloud_spend_2024, which samples in the same order as this
+    function so the two match exactly under the shared seed."""
+    sq.set_seed(42)
+    P = load_lab_params()["anthropic"]
+
+    # Reported full-year cloud spend totals, correlated (same reporting).
+    spend24_dist, spend25_dist = sq.correlate(
+        (P["cloud_spend_2024"], P["cloud_spend_2025"]), 0.5)
+    spend_2024 = (spend24_dist @ N_SAMPLES) * 1e9
+    spend_2025 = (spend25_dist @ N_SAMPLES) * 1e9
+
+    # The annual totals fix the average 2024->2025 growth; the shape factor
+    # says when within 2025 the ramp happened. The exponential that integrates
+    # to the 2025 total then gives the spending rate at the year boundary
+    # (which is both where 2025 starts and where 2024 ends).
+    growth_shape = P["spend_growth_shape_2025"] @ N_SAMPLES
+    inst_rate = np.log(spend_2025 / spend_2024) * growth_shape
+    runrate_2024_end = (spend_2025 * inst_rate / (1 - np.exp(-inst_rate))
+                        * np.exp(-inst_rate))
+
+    # A rented chip billed around the clock costs its hourly rate for each of
+    # the year's 8,760 hours.
+    price_2024 = P["effective_price_2024"] @ N_SAMPLES
+    anthropic_2024_h100e = runrate_2024_end / (price_2024 * 8760)
+
+    MODEL_STEPS["anthropic_2024"] = [
+        step("cloud_spend_2024", "2024 cloud spend (full year)", spend_2024 / 1e9,
+             "USD B/yr", "input"),
+        step("cloud_spend_2025", "2025 cloud spend (full year)", spend_2025 / 1e9,
+             "USD B/yr", "input"),
+        step("spend_growth_shape_2025", "Within-2025 growth shape", growth_shape,
+             "multiplier", "input"),
+        step("runrate_2024_end", "End-2024 spending rate", runrate_2024_end / 1e9,
+             "USD B/yr", "derived",
+             "the exponential spend curve through both annual totals, read at the year boundary"),
+        step("effective_price_2024", "2024 effective price", price_2024,
+             "USD/H100e-hr", "input"),
+        step("total_h100e", "Anthropic compute, end-2024", anthropic_2024_h100e,
+             "H100e", "final", "runrate_2024_end ÷ (effective_price_2024 × 8760 h)"),
+    ]
+    return anthropic_2024_h100e
+
+
+# ---------------------------------------------------------------------------
+# 6. SpaceXAI (Colossus-anchored; end-2024, end-2025, and mid-2026)
+# ---------------------------------------------------------------------------
+# SpaceXAI H100e = Colossus capacity x accuracy factor + other compute, per the
+# methodology of https://epoch.ai/gradient-updates/frontier-labs-dont-use-most-ai-compute:
+# nearly all of SpaceXAI's compute is the two Memphis-area Colossus campuses,
+# so the fleet is anchored directly on Epoch's dated data-center capacity
+# estimates rather than on chip-fleet accounting. "Other compute" is a small
+# buffer for capacity outside the two campuses: third-party cloud purchases
+# (bounded by the S-1's blended infrastructure-and-cloud expense lines,
+# roughly $1-2B/yr at end-2025) plus minor owned sites (Atlanta, Portland).
+#
+# The two sites read the timeline differently. Colossus 1 grew rack by rack
+# (100k -> 200k H100s over fall 2024), so snapshots between its milestones
+# interpolate linearly. Colossus 2 arrives in discrete phases (whole 110k- or
+# 220k-GPU clusters), and its later milestones are Epoch *projections* from
+# cooling-equipment progress, not observations — so a snapshot takes the last
+# milestone at or before it as firm and samples what fraction of the next
+# phase is already open (the c2_next_phase_open prior; mid-2026 sits one day
+# before the projected ~July 1 completion of the 400+ MW expansion).
+#
+# The mid-2026 snapshot nets out the capacity SpaceX *sells* to other labs —
+# Anthropic (all of Colossus 1 since May 2026, possibly spilling into C2),
+# Google (one ~110k-GPU C2 cluster, ramping toward Sept 2026), and Reflection
+# AI (small C2 carve-out from July 1) — because the estimate targets
+# SpaceXAI's own AI effort, including Cursor (an internal allocation per the
+# S-1), not the SpaceX total. No subtractions before 2026: the sale
+# agreements all start May-July 2026.
+
+SPACEXAI_SNAPSHOTS = {
+    "2024": pd.Timestamp("2024-12-31"),
+    "2025": pd.Timestamp("2025-12-31"),
+    "h1_2026": pd.Timestamp("2026-06-30"),
+}
+
+
+def _site_h100e_at(timelines, site, when):
+    """Operational H100e at one data center on a date, interpolated linearly
+    between Epoch's dated milestone estimates (flat before the first and after
+    the last milestone; milestones without an H100e estimate are skipped)."""
+    rows = (timelines[timelines["Data center"] == site]
+            .dropna(subset=["H100 equivalents"]).sort_values("Date"))
+    days = (rows["Date"] - rows["Date"].iloc[0]).dt.days.to_numpy(dtype=float)
+    target = (when - rows["Date"].iloc[0]).days
+    return float(np.interp(target, days, rows["H100 equivalents"].to_numpy(dtype=float)))
+
+
+def _phase_split_at(timelines, site, when):
+    """Split a phase-built site's capacity at a date into (open, pending):
+    the level at the last milestone at or before the date (0 if none), and
+    the increment to the next milestone (0 if none). Between milestones the
+    open level is firm, while the next phase — often an Epoch projection —
+    may be anywhere from not started to fully online."""
+    rows = (timelines[timelines["Data center"] == site]
+            .dropna(subset=["H100 equivalents"]).sort_values("Date"))
+    levels = rows["H100 equivalents"].to_numpy(dtype=float)
+    before = rows["Date"] <= when
+    open_level = float(levels[before.to_numpy()][-1]) if before.any() else 0.0
+    after = ~before
+    next_level = float(levels[after.to_numpy()][0]) if after.any() else open_level
+    return open_level, max(next_level - open_level, 0.0)
+
+
+def model_spacexai():
+    """Returns {"2024": ..., "2025": ..., "h1_2026": ...} H100e sample arrays.
+    The 2024/2025 snapshots are the whole fleet; mid-2026 is net of sales."""
+    sq.set_seed(42)
+    P = load_lab_params()["spacexai"]
+    timelines = load_data_center_timelines()
+
+    results = {}
+    for tag, when in SPACEXAI_SNAPSHOTS.items():
+        c1 = _site_h100e_at(timelines, "Colossus 1", when)
+        c2_open, c2_pending = _phase_split_at(timelines, "Colossus 2", when)
+        # One shared accuracy factor per snapshot: how far the true operational
+        # level sits from the timeline read (H100e conversion, satellite power
+        # reads, and — for 2024 — the interpolated Colossus 1 ramp).
+        accuracy = P[f"capacity_accuracy_{tag}"] @ N_SAMPLES
+
+        steps = [
+            step("c1_anchor", "Colossus 1 capacity (Epoch timeline)", c1, "H100e", "constant"),
+            step("c2_open", "Colossus 2, phases observed open", c2_open, "H100e", "constant"),
+        ]
+        if c2_pending > 0:
+            # The next C2 phase is an Epoch projection; sample how much of it
+            # is online by the snapshot date.
+            phase_open = P[f"c2_next_phase_open_{tag}"] @ N_SAMPLES
+            c2 = c2_open + c2_pending * phase_open
+            steps += [
+                step("c2_pending", "Colossus 2, next projected phase", c2_pending,
+                     "H100e", "constant"),
+                step("c2_phase_open", "Share of the next phase open", phase_open,
+                     "share", "input"),
+                step("c2_h100e", "Colossus 2 capacity", c2, "H100e", "derived",
+                     "c2_open + c2_pending × c2_phase_open"),
+            ]
+        else:
+            c2 = c2_open
+        colossus = (c1 + c2) * accuracy
+        other = P[f"other_compute_{tag}"] @ N_SAMPLES
+        fleet = colossus + other
+
+        steps += [
+            step("capacity_accuracy", "Capacity-anchor accuracy", accuracy, "ratio", "input"),
+            step("colossus", "Colossus operational capacity", colossus, "H100e", "derived",
+                 "(Colossus 1 + Colossus 2) × capacity_accuracy"),
+            step("other_compute", "Other sites + cloud purchases", other, "H100e", "input"),
+        ]
+
+        if tag != "h1_2026":
+            results[tag] = fleet
+            steps.append(step("total_h100e", f"SpaceXAI compute, end-{tag}", fleet,
+                              "H100e", "final", "colossus + other_compute"))
+            MODEL_STEPS[f"spacexai_{tag}"] = steps
+            continue
+
+        # Mid-2026 cloud sales. Anthropic holds all of Colossus 1, so its base
+        # subtraction reuses the C1 anchor (scaled by the same accuracy draw).
+        anthropic_spillover = P["anthropic_c2_spillover"] @ N_SAMPLES
+        anthropic_sold = c1 * accuracy + anthropic_spillover
+        # The Google deal covers ~110k GPUs — one of C2's two S-1 clusters.
+        # Either cluster carries the same H100e (B300 ≈ B200 at dense 8-bit),
+        # so size the deal off the first-cluster milestone (the end-2025 level).
+        c2_first_cluster, _ = _phase_split_at(timelines, "Colossus 2",
+                                              SPACEXAI_SNAPSHOTS["2025"])
+        google_ramp = P["google_ramp_share"] @ N_SAMPLES
+        google_sold = c2_first_cluster * accuracy * google_ramp
+        reflection_sold = P["reflection_sold_h100e"] @ N_SAMPLES
+        internal = fleet - anthropic_sold - google_sold - reflection_sold
+        results[tag] = internal
+
+        steps += [
+            step("fleet", "Total SpaceX fleet", fleet, "H100e", "derived",
+                 "colossus + other_compute"),
+            step("anthropic_spillover", "Anthropic spillover into C2",
+                 anthropic_spillover, "H100e", "input"),
+            step("anthropic_sold", "Sold to Anthropic (all of C1)", anthropic_sold,
+                 "H100e", "derived", "c1_anchor × capacity_accuracy + anthropic_spillover"),
+            step("google_ramp_share", "Google ramp share by June 30", google_ramp,
+                 "share", "input"),
+            step("google_sold", "Sold to Google (one C2 cluster, ramping)", google_sold,
+                 "H100e", "derived", "C2 first cluster × capacity_accuracy × google_ramp_share"),
+            step("reflection_sold", "Sold to Reflection AI", reflection_sold,
+                 "H100e", "input"),
+            step("total_h100e", "SpaceXAI compute, mid-2026", internal, "H100e", "final",
+                 "fleet − anthropic_sold − google_sold − reflection_sold"),
+        ]
+        MODEL_STEPS[f"spacexai_{tag}"] = steps
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
 
 def main():
     openai_result = model_openai()
+    spacexai = model_spacexai()
     labs = {
         "Google DeepMind": model_deepmind(),
         "Meta SL": model_msl(),
         "OpenAI": openai_result["total_h100e"],
         "Anthropic": model_anthropic(openai_result),
+        "SpaceXAI": spacexai["2025"],
     }
 
     print("End-2025 compute, H100-equivalents (5th / median / 95th):\n")
@@ -662,18 +868,25 @@ def main():
         "Google DeepMind": model_deepmind_2024(),
         "Meta AI (pre-MSL)": model_msl_2024(),
         "OpenAI": openai_2024,
+        "Anthropic": model_anthropic_2024(),
+        "SpaceXAI": spacexai["2024"],
     }
-    print("\nEnd-2024 backcasts (Anthropic's lives in anthropic_2024_backcast):\n")
+    print("\nEnd-2024 backcasts:\n")
     print(f"  {'Lab':<18}{'5th':>10}{'median':>10}{'95th':>10}")
     for name, samples in backcasts.items():
         lo, mid, hi = pctiles(samples)
         print(f"  {name:<18}{fmt(lo):>10}{fmt(mid):>10}{fmt(hi):>10}")
 
+    lo, mid, hi = pctiles(spacexai["h1_2026"])
+    print("\nMid-2026 (June 30), net of Colossus capacity sold to Anthropic /"
+          " Google / Reflection:\n")
+    print(f"  {'SpaceXAI':<18}{fmt(lo):>10}{fmt(mid):>10}{fmt(hi):>10}")
+
     # One comparison chart: median bar per lab with a 90% CI error bar.
     fig, ax = plt.subplots(figsize=(10, 4.6))
     fig.subplots_adjust(left=0.16, right=0.97, top=0.88, bottom=0.13)
     colors = {"Google DeepMind": "#2B8C86", "Meta SL": "#2B6CB8",
-              "OpenAI": "#1a73e8", "Anthropic": "#e8710a"}
+              "OpenAI": "#1a73e8", "Anthropic": "#e8710a", "SpaceXAI": "#333333"}
     names = list(labs)
     highest = 0.0
     for i, name in enumerate(names):
