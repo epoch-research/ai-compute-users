@@ -413,6 +413,31 @@ ax.set_title("MSL against the operational and owned fleets",
 plt.show()
 
 # %% [markdown]
+# ## MSL H100e distribution
+#
+# The full Monte Carlo distribution behind the headline number — the bar chart
+# above collapses this to a median and 90% interval. The long right tail is the
+# signature of a product of uncertain factors (owned fleet × deployment lag ×
+# MSL share) plus the zero-inflated rented-cloud top-up: the median sits well
+# below the mean.
+
+# %%
+msl_p = sq.get_percentiles(msl_compute, percentiles=[5, 50, 95])
+
+fig, ax = plt.subplots(figsize=(8, 4.5))
+ax.hist(msl_compute / 1e6, bins=60, color="#7FA9E6", alpha=0.9,
+        edgecolor="white")
+for q, style in [(5, "--"), (50, "-"), (95, "--")]:
+    ax.axvline(msl_p[q] / 1e6, color="#2B4A7E", ls=style, lw=1.4)
+    ax.text(msl_p[q] / 1e6, ax.get_ylim()[1] * 0.97, fmt(msl_p[q]), rotation=90,
+            va="top", ha="right", fontsize=9, color="#2B4A7E")
+ax.set_xlabel("MSL H100e (millions)")
+ax.set_ylabel("Monte Carlo samples")
+ax.set_title(f"MSL end-2025 H100e: {fmt(msl_p[50])} "
+             f"(90% CI {fmt(msl_p[5])}–{fmt(msl_p[95])})", weight="bold")
+plt.show()
+
+# %% [markdown]
 # ## Sensitivity check: narrowing and widening the MSL-share uncertainty
 #
 # The baseline 0.33–0.8 CI is deliberately wide. A tighter reading — taking

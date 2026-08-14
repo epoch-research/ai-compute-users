@@ -374,6 +374,30 @@ ax.set_title("DeepMind against the operational and owned fleets",
 plt.show()
 
 # %% [markdown]
+# ## DeepMind H100e distribution
+#
+# The full Monte Carlo distribution behind the headline number — the bar chart
+# above collapses this to a median and 90% interval. The long right tail is the
+# signature of a product of uncertain factors (owned fleet × deployment lag ×
+# DeepMind fraction): the median sits well below the mean.
+
+# %%
+dm_p = sq.get_percentiles(dm_compute, percentiles=[5, 50, 95])
+
+fig, ax = plt.subplots(figsize=(8, 4.5))
+ax.hist(dm_compute / 1e6, bins=60, color="#7AC4C0", alpha=0.9,
+        edgecolor="white")
+for q, style in [(5, "--"), (50, "-"), (95, "--")]:
+    ax.axvline(dm_p[q] / 1e6, color="#2B5F5C", ls=style, lw=1.4)
+    ax.text(dm_p[q] / 1e6, ax.get_ylim()[1] * 0.97, fmt(dm_p[q]), rotation=90,
+            va="top", ha="right", fontsize=9, color="#2B5F5C")
+ax.set_xlabel("DeepMind H100e (millions)")
+ax.set_ylabel("Monte Carlo samples")
+ax.set_title(f"DeepMind end-2025 H100e: {fmt(dm_p[50])} "
+             f"(90% CI {fmt(dm_p[5])}–{fmt(dm_p[95])})", weight="bold")
+plt.show()
+
+# %% [markdown]
 # ## Sensitivity check: doubling TPU uncertainty
 #
 # There's a worry the dashboard's reported TPU CI (3.08M–4.54M) is too tight. Here
