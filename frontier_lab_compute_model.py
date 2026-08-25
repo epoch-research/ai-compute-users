@@ -125,19 +125,21 @@ def model_deepmind():
         step("nvidia_owned", "Google-owned Nvidia fleet", nvidia_owned, "H100e", "input"),
         step("google_owned", "Google TPU fleet", google_owned, "H100e", "input"),
         step("total_owned", "Total owned fleet", total_owned, "H100e", "derived",
-             "nvidia_owned + google_owned"),
-        step("deployment_lag", "Operational share of owned", deployment_lag, "ratio", "input"),
+             "Google-owned Nvidia fleet + Google TPU fleet"),
+        step("deployment_lag", "Operational share", deployment_lag, "ratio", "input",
+             "share of owned chips that are up and running"),
         step("operational", "Operational fleet", operational, "H100e", "derived",
-             "total_owned × deployment_lag"),
+             "Total owned fleet × Operational share"),
         step("cloud_share", "Cloud share of Google ML compute", cloud_share, "share", "input"),
         step("dm_cloud_share", "DeepMind share of the cloud half", dm_cloud_share, "share", "input"),
         step("dm_noncloud_share", "DeepMind share of the internal half", dm_noncloud_share,
              "share", "input"),
         step("dm_fraction", "DeepMind fraction of the operational fleet", dm_fraction,
              "share", "derived",
-             "cloud_share × dm_cloud_share + (1 − cloud_share) × dm_noncloud_share"),
+             "Cloud share × DeepMind share of the cloud half"
+             " + (1 − Cloud share) × DeepMind share of the internal half"),
         step("total_h100e", "DeepMind compute, end-2025", dm_h100e, "H100e", "final",
-             "operational × dm_fraction"),
+             "Operational fleet × DeepMind fraction of the operational fleet"),
     ]
     return dm_h100e
 
@@ -183,20 +185,21 @@ def model_msl():
         step("nvidia_owned", "Meta-owned Nvidia fleet", nvidia_owned, "H100e", "input"),
         step("amd_owned", "Meta-owned AMD Instinct fleet", amd_owned, "H100e", "input"),
         step("total_owned", "Total owned fleet", total_owned, "H100e", "derived",
-             "nvidia_owned + amd_owned"),
-        step("deployment_lag", "Operational share of owned", deployment_lag, "ratio", "input"),
+             "Meta-owned Nvidia fleet + Meta-owned AMD Instinct fleet"),
+        step("deployment_lag", "Operational share", deployment_lag, "ratio", "input",
+             "share of owned chips that are up and running"),
         step("operational", "Operational fleet", operational, "H100e", "derived",
-             "total_owned × deployment_lag"),
+             "Total owned fleet × Operational share"),
         step("msl_share", "MSL share vs core-business recommenders", msl_share, "share", "input"),
         step("msl_owned", "MSL slice of the owned fleet", msl_owned, "H100e", "derived",
-             "operational × msl_share"),
+             "Operational fleet × MSL share vs core-business recommenders"),
         step("cloud_spend", "Cloud rental spend run rate", cloud_spend, "USD B/yr", "input"),
         step("rental_price", "Rental price per H100e-hour", price_per_h100e_hour,
              "USD/H100e-hr", "input"),
         step("rented_h100e", "Rented cloud compute", rented_h100e, "H100e", "derived",
-             "cloud_spend ÷ (rental_price × 8760 h)"),
+             "Cloud rental spend run rate ÷ (Rental price per H100e-hour × 8760 h/yr)"),
         step("total_h100e", "MSL compute, end-2025", msl_h100e, "H100e", "final",
-             "msl_owned + rented_h100e"),
+             "MSL slice of the owned fleet + Rented cloud compute"),
     ]
     return msl_h100e
 
@@ -348,10 +351,13 @@ def model_openai():
     # Undercounted providers push up, overstatement down (median ~1.04).
     accuracy_factor = P["figure_accuracy"] @ N_SAMPLES
     # Rounding jitter: the disclosures' 0.1 GW rounding half-step, triangular
-    # (edges less likely).
+    # (edges less likely). Drawn independently per year.
     rounding_mw = P["rounding_mw"]
+    rounding_jitter = {
+        d: sq.triangular(-rounding_mw, 0.0, rounding_mw) @ N_SAMPLES for d in dates
+    }
     total_power = {
-        d: (data["disclosed"][d] + (sq.triangular(-rounding_mw, 0.0, rounding_mw) @ N_SAMPLES))
+        d: (data["disclosed"][d] + rounding_jitter[d])
         * definition_factor * accuracy_factor
         for d in dates
     }
@@ -374,23 +380,28 @@ def model_openai():
     MODEL_STEPS["openai"] = [
         step("disclosed_power", "Disclosed end-2025 power", data["disclosed"][last_date],
              "MW", "constant"),
+        step("rounding_jitter", "Rounding adjustment (±)", rounding_jitter[last_date],
+             "MW", "input",
+             "the disclosed figure is rounded to 0.1 GW, so the true value sits"
+             " within half a step either way"),
         step("definition_factor", "Power-definition factor (IT vs gross)", definition_factor,
-             "ratio", "input", "mixture(if_it_power, 1 / gross_pue; p_gross)"),
+             "ratio", "input",
+             "blend of two cases — figure is already IT power (≈1),"
+             " or it's gross power ÷ data-center PUE"),
         step("accuracy_factor", "Figure-accuracy factor", accuracy_factor, "ratio", "input"),
         step("total_power", "Modelled end-2025 IT power", total_power[last_date],
              "MW", "derived",
-             "(disclosed_power + rounding jitter) × definition_factor × accuracy_factor"),
+             "(Disclosed end-2025 power + Rounding adjustment)"
+             " × Power-definition factor × Figure-accuracy factor"),
         step("lag_quarters", "Deployment lag behind Microsoft's mix", lag_quarters,
              "quarters", "input"),
         step("it_overhead", "Server-to-IT power overhead", it_overhead, "ratio", "input"),
-    ] + [
-        step(c.lower().replace("/", "_").replace(" ", "_") + "_count", f"{c} chips",
-             counts[c], "chips", "derived",
-             "total_power × mix share ÷ (server watts × it_overhead)")
-        for c in OAI_CHIP_TYPES
-    ] + [
         step("total_h100e", "OpenAI compute, end-2025", total_h100e_by_date[last_date],
-             "H100e", "final", "Σ chip count × H100e per chip"),
+             "H100e", "final",
+             "Modelled end-2025 IT power spread across Microsoft's chip mix"
+             " (shifted by the Deployment lag), each chip type's power turned into"
+             " chips at its server watts × Server-to-IT power overhead, then summed"
+             " as H100-equivalents"),
     ]
 
     return dict(total_h100e=total_h100e_by_date[last_date],
@@ -406,7 +417,10 @@ def model_openai():
 # TPU mix buy about the same H100e per watt, while Trainium2 buys ~0.75x as much
 # (per the New Carlisle equivalency in the sheet's chip_specs rows); so the fleet
 # collapses to two buckets and the Trainium2 power share is the lever.
-# Nvidia specs and the H100:Blackwell ratio are borrowed from the OpenAI model.
+# Nvidia specs and the H100:Blackwell ratio are borrowed from the OpenAI model as
+# point values; sampled multipliers restore each bucket's efficiency uncertainty
+# (nontrainium_eff for Nvidia+TPU, trainium_eff for Trainium2's estimated
+# TDP x Nvidia-derived overhead).
 
 # Shared hardware constants from the params sheet's chip_specs rows: TPU TDPs,
 # the IT-power overhead, and the supplied Trainium2 equivalency (a fleet worth a
@@ -479,20 +493,38 @@ def model_anthropic(openai_result):
     # against Amazon's ~1.4M deployed chips. Sampled independently of power.
     trainium_share = P["trainium_share"] @ N_SAMPLES
 
-    blended_per_mw = trainium_share * trainium2_per_mw + (1 - trainium_share) * nontrainium_per_mw
+    # The non-Trainium bucket's specs above are borrowed point values; this
+    # multiplier restores the fleet-efficiency uncertainty the OpenAI model
+    # samples (lag + IT overhead), widened a bit for the TPU side.
+    nontrainium_eff = P["nontrainium_eff"] @ N_SAMPLES
+
+    # Trainium2's ~870 W per chip is an estimated TDP times an overhead borrowed
+    # from Nvidia hardware; this multiplier collapses both uncertainties into one.
+    trainium_eff = P["trainium_eff"] @ N_SAMPLES
+
+    blended_per_mw = (trainium_share * trainium2_per_mw * trainium_eff
+                      + (1 - trainium_share) * nontrainium_per_mw * nontrainium_eff)
     anthropic_h100e = power_mw * blended_per_mw
 
     MODEL_STEPS["anthropic"] = [
-        step("power_mw", "Total IT power", power_mw, "MW", "input", "lab_power_gw × 1000"),
+        step("power_mw", "Total IT power", power_mw, "MW", "input",
+             "Leaked lab power (GW) × 1000"),
         step("trainium_share", "Trainium2 share of IT power", trainium_share, "share", "input"),
         step("trainium2_per_mw", "Trainium2 fleet efficiency", trainium2_per_mw,
              "H100e/MW", "constant"),
+        step("trainium_eff", "Trainium2 efficiency — uncertainty adjustment", trainium_eff,
+             "ratio", "input"),
         step("nontrainium_per_mw", "Nvidia + TPU fleet efficiency", nontrainium_per_mw,
              "H100e/MW", "constant"),
+        step("nontrainium_eff", "Nvidia + TPU efficiency — uncertainty adjustment", nontrainium_eff,
+             "ratio", "input"),
         step("blended_per_mw", "Blended fleet efficiency", blended_per_mw, "H100e/MW", "derived",
-             "trainium_share × trainium2_per_mw + (1 − trainium_share) × nontrainium_per_mw"),
+             "Trainium2 share of IT power × Trainium2 fleet efficiency"
+             " × Trainium2 efficiency adjustment"
+             " + (1 − Trainium2 share of IT power) × Nvidia + TPU fleet efficiency"
+             " × Nvidia + TPU efficiency adjustment"),
         step("total_h100e", "Anthropic compute, end-2025", anthropic_h100e, "H100e", "final",
-             "power_mw × blended_per_mw"),
+             "Total IT power × Blended fleet efficiency"),
     ]
     return anthropic_h100e
 
@@ -577,15 +609,16 @@ def model_deepmind_2024():
         step("nvidia_owned", "Google-owned Nvidia fleet", nvidia_owned, "H100e", "input"),
         step("google_owned", "Google TPU fleet", google_owned, "H100e", "input"),
         step("total_owned", "Total owned fleet", total_owned, "H100e", "derived",
-             "nvidia_owned + google_owned"),
-        step("lag_quarters_2024", "Deployment lag", lag_quarters, "quarters", "input"),
-        step("deployment_lag", "Operational share of owned", deployment_lag, "ratio", "derived",
-             "owned stock lag_quarters_2024 before end-2024 ÷ end-2024 stock"),
+             "Google-owned Nvidia fleet + Google TPU fleet"),
+        step("lag_quarters_2024", "Deployment lag", lag_quarters, "quarters", "input",
+             "delay from owning chips to running them"),
+        step("deployment_lag", "Operational share", deployment_lag, "ratio", "derived",
+             "owned stock one Deployment lag earlier ÷ end-2024 stock"),
         step("operational", "Operational fleet", operational, "H100e", "derived",
-             "total_owned × deployment_lag"),
+             "Total owned fleet × Operational share"),
         step("dm_share_2024", "DeepMind share of Google ML compute", dm_share, "share", "input"),
         step("total_h100e", "DeepMind compute, end-2024", dm_h100e, "H100e", "final",
-             "operational × dm_share_2024"),
+             "Operational fleet × DeepMind share of Google ML compute"),
     ]
     return dm_h100e
 
@@ -623,18 +656,19 @@ def model_msl_2024():
         step("meta_amd_share_2024", "Meta share of the AMD fleet", meta_amd_share,
              "share", "input"),
         step("amd_owned", "Meta-owned AMD Instinct fleet", amd_owned, "H100e", "derived",
-             "amd_all_owners × meta_amd_share_2024"),
+             "AMD Instinct fleet, all owners × Meta share of the AMD fleet"),
         step("total_owned", "Total owned fleet", total_owned, "H100e", "derived",
-             "nvidia_owned + amd_owned"),
-        step("lag_quarters_2024", "Deployment lag", lag_quarters, "quarters", "input"),
-        step("deployment_lag", "Operational share of owned", deployment_lag, "ratio", "derived",
-             "owned stock lag_quarters_2024 before end-2024 ÷ end-2024 stock"),
+             "Meta-owned Nvidia fleet + Meta-owned AMD Instinct fleet"),
+        step("lag_quarters_2024", "Deployment lag", lag_quarters, "quarters", "input",
+             "delay from owning chips to running them"),
+        step("deployment_lag", "Operational share", deployment_lag, "ratio", "derived",
+             "owned stock one Deployment lag earlier ÷ end-2024 stock"),
         step("operational", "Operational fleet", operational, "H100e", "derived",
-             "total_owned × deployment_lag"),
+             "Total owned fleet × Operational share"),
         step("meta_ai_share_2024", "Meta AI (pre-MSL) frontier share", meta_ai_share,
              "share", "input"),
         step("total_h100e", "Meta AI frontier compute, end-2024", meta_h100e, "H100e", "final",
-             "operational × meta_ai_share_2024"),
+             "Operational fleet × Meta AI (pre-MSL) frontier share"),
     ]
     return meta_h100e
 
@@ -678,14 +712,18 @@ def model_anthropic_2024():
         step("cloud_spend_2025", "2025 cloud spend (full year)", spend_2025 / 1e9,
              "USD B/yr", "input"),
         step("spend_growth_shape_2025", "Within-2025 growth shape", growth_shape,
-             "multiplier", "input"),
+             "multiplier", "input",
+             "multiplier on the average 2024→2025 spend-growth rate: 1 = steady"
+             " exponential growth; above 1 = growth concentrated later in 2025,"
+             " so spending was still low at the year boundary"),
         step("runrate_2024_end", "End-2024 spending rate", runrate_2024_end / 1e9,
              "USD B/yr", "derived",
              "the exponential spend curve through both annual totals, read at the year boundary"),
         step("effective_price_2024", "2024 effective price", price_2024,
              "USD/H100e-hr", "input"),
         step("total_h100e", "Anthropic compute, end-2024", anthropic_2024_h100e,
-             "H100e", "final", "runrate_2024_end ÷ (effective_price_2024 × 8760 h)"),
+             "H100e", "final",
+             "End-2024 spending rate ÷ (2024 effective price × 8760 h/yr)"),
     ]
     return anthropic_2024_h100e
 
@@ -784,7 +822,8 @@ def model_spacexai():
                 step("c2_phase_open", "Share of the next phase open", phase_open,
                      "share", "input"),
                 step("c2_h100e", "Colossus 2 capacity", c2, "H100e", "derived",
-                     "c2_open + c2_pending × c2_phase_open"),
+                     "Colossus 2 phases observed open"
+                     " + Colossus 2 next projected phase × Share of the next phase open"),
             ]
         else:
             c2 = c2_open
@@ -795,14 +834,15 @@ def model_spacexai():
         steps += [
             step("capacity_accuracy", "Capacity-anchor accuracy", accuracy, "ratio", "input"),
             step("colossus", "Colossus operational capacity", colossus, "H100e", "derived",
-                 "(Colossus 1 + Colossus 2) × capacity_accuracy"),
+                 "(Colossus 1 capacity + Colossus 2 capacity) × Capacity-anchor accuracy"),
             step("other_compute", "Other sites + cloud purchases", other, "H100e", "input"),
         ]
 
         if tag != "h1_2026":
             results[tag] = fleet
             steps.append(step("total_h100e", f"SpaceXAI compute, end-{tag}", fleet,
-                              "H100e", "final", "colossus + other_compute"))
+                              "H100e", "final",
+                              "Colossus operational capacity + Other sites + cloud purchases"))
             MODEL_STEPS[f"spacexai_{tag}"] = steps
             continue
 
@@ -823,19 +863,21 @@ def model_spacexai():
 
         steps += [
             step("fleet", "Total SpaceX fleet", fleet, "H100e", "derived",
-                 "colossus + other_compute"),
+                 "Colossus operational capacity + Other sites + cloud purchases"),
             step("anthropic_spillover", "Anthropic spillover into C2",
                  anthropic_spillover, "H100e", "input"),
             step("anthropic_sold", "Sold to Anthropic (all of C1)", anthropic_sold,
-                 "H100e", "derived", "c1_anchor × capacity_accuracy + anthropic_spillover"),
+                 "H100e", "derived",
+                 "Colossus 1 capacity × Capacity-anchor accuracy + Anthropic spillover into C2"),
             step("google_ramp_share", "Google ramp share by June 30", google_ramp,
                  "share", "input"),
             step("google_sold", "Sold to Google (one C2 cluster, ramping)", google_sold,
-                 "H100e", "derived", "C2 first cluster × capacity_accuracy × google_ramp_share"),
+                 "H100e", "derived",
+                 "Colossus 2 first cluster × Capacity-anchor accuracy × Google ramp share by June 30"),
             step("reflection_sold", "Sold to Reflection AI", reflection_sold,
                  "H100e", "input"),
             step("total_h100e", "SpaceXAI compute, mid-2026", internal, "H100e", "final",
-                 "fleet − anthropic_sold − google_sold − reflection_sold"),
+                 "Total SpaceX fleet − Sold to Anthropic − Sold to Google − Sold to Reflection AI"),
         ]
         MODEL_STEPS[f"spacexai_{tag}"] = steps
     return results
