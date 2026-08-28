@@ -919,10 +919,9 @@ def main():
         lo, mid, hi = pctiles(samples)
         print(f"  {name:<18}{fmt(lo):>10}{fmt(mid):>10}{fmt(hi):>10}")
 
-    lo, mid, hi = pctiles(spacexai["h1_2026"])
-    print("\nMid-2026 (June 30), net of Colossus capacity sold to Anthropic /"
-          " Google / Reflection:\n")
-    print(f"  {'SpaceXAI':<18}{fmt(lo):>10}{fmt(mid):>10}{fmt(hi):>10}")
+    # SpaceXAI mid-2026 (spacexai["h1_2026"], June 30 net of sales) is held back
+    # from the mainline exports for now; it still lives in the
+    # spacexai_compute_model notebook. model_spacexai() keeps computing it.
 
     # One comparison chart: median bar per lab with a 90% CI error bar.
     fig, ax = plt.subplots(figsize=(10, 4.6))

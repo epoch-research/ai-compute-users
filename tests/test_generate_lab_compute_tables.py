@@ -59,13 +59,13 @@ def test_one_row_per_lab_year(table):
 
 
 def test_dates_are_year_ends_except_declared_mid_year_snapshots(table):
+    # Every snapshot is a Dec 31 year-end unless it's a declared mid-year one.
+    # MID_YEAR_SNAPSHOTS is currently empty (SpaceXAI mid-2026 is held back from
+    # the mainline exports), so this reduces to "all dates are year-ends"; the
+    # mid-year branch stays covered for whenever such a snapshot is restored.
     for row in table.itertuples():
         expected = MID_YEAR_SNAPSHOTS.get((row.Lab, row.Year), f"{row.Year}-12-31")
         assert row.Date == expected, f"{row.Lab} {row.Year}: {row.Date} != {expected}"
-    # SpaceXAI's 2026 snapshot is June 30 and its Name says "mid", not "end".
-    spacexai_2026 = table[(table["Lab"] == "SpaceXAI") & (table["Year"] == 2026)]
-    assert spacexai_2026["Date"].iloc[0] == "2026-06-30"
-    assert spacexai_2026["Name"].iloc[0] == "SpaceXAI mid-2026"
 
 
 def test_percentiles_are_ordered_and_positive(table):

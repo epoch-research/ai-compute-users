@@ -432,9 +432,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
       <b>Hover or click a bar</b> to see how that estimate is built, step by step.
       2024 values are backcasts (Google DeepMind and Meta cover the predecessor
       frontier-AI orgs &mdash; Meta Superintelligence Labs did not exist in 2024;
-      Anthropic&rsquo;s converts reported cloud spend at 2024 prices). The 2026
-      group is SpaceXAI at June 30, net of the Colossus capacity SpaceX sells to
-      Anthropic, Google, and Reflection AI.
+      Anthropic&rsquo;s converts reported cloud spend at 2024 prices).
     </p>
   </header>
 
@@ -442,7 +440,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
     <div class="legend" id="legend"></div>
     <div class="chart-scroll">
       <svg id="chart" viewBox="0 0 860 430" role="img"
-           aria-label="Grouped bar chart of frontier lab compute from end of 2023 through mid-2026, in H100 equivalents, with 90 percent credible intervals. Each bar links to a walkthrough of its model."></svg>
+           aria-label="Grouped bar chart of frontier lab compute from end of 2023 through end of 2025, in H100 equivalents, with 90 percent credible intervals. Each bar links to a walkthrough of its model."></svg>
     </div>
     <details class="datatable">
       <summary>Data table</summary>
@@ -459,8 +457,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
     <p class="chart-footnote">
       Estimates are operational-stock snapshots of compute rented or used (not owned) &mdash;
       consecutive years must not be summed. Missing bars mean &ldquo;no estimate&rdquo;, not zero:
-      2023 covers OpenAI only, and the 2026 group covers SpaceXAI only (a June 30
-      snapshot, net of capacity sold to other labs).
+      2023 covers OpenAI only.
     </p>
   </section>
 
@@ -469,7 +466,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
     <p>
       Each estimate &mdash; every lab at end-2025, end-2024 backcasts for Google
       DeepMind, Meta (whose 2024 scope is the predecessor org, Meta&nbsp;AI&thinsp;/&thinsp;GenAI),
-      Anthropic, and SpaceXAI, plus SpaceXAI at mid-2026 &mdash; is a Monte Carlo
+      Anthropic, and SpaceXAI &mdash; is a Monte Carlo
       combination of a few sampled inputs. Rows show every quantity
       in model order: a dot at the median with a whisker spanning the 90% credible interval,
       grouped by unit onto a shared scale (5,000 samples each). Sampled inputs are priors from
@@ -524,7 +521,6 @@ const BACKCAST_NOTE = {
   'meta-superintelligence-labs-2024': 'End-2024 backcast · Meta AI / GenAI scope',
   'anthropic-2024': 'End-2024 backcast · from reported cloud spend',
   'spacexai-2024': 'End-2024 backcast',
-  'spacexai-2026': 'June 30 · net of capacity sold to Anthropic, Google, Reflection',
 };
 
 // ── Formatting ──────────────────────────────────────────────────────────────

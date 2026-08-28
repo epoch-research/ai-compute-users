@@ -65,13 +65,18 @@ LAB_YEAR_KEYS = {
     ("Anthropic", 2024): "anthropic_2024",
     ("SpaceXAI", 2025): "spacexai_2025",
     ("SpaceXAI", 2024): "spacexai_2024",
-    ("SpaceXAI", 2026): "spacexai_h1_2026",
+    # SpaceXAI mid-2026 is held back from the mainline exports for now — it
+    # still lives in the spacexai_compute_model notebook. To restore it, re-add
+    # ("SpaceXAI", 2026): "spacexai_h1_2026" here, its MID_YEAR_SNAPSHOTS entry,
+    # and its run_lab_samples() line below.
 }
 
-# Snapshots dated mid-year rather than Dec 31. SpaceXAI's 2026 snapshot is
-# June 30 (net of the Colossus capacity sold to Anthropic/Google/Reflection —
-# the sales all start May-July 2026, so an end-2026 read would be stale).
-MID_YEAR_SNAPSHOTS = {("SpaceXAI", 2026): "2026-06-30"}
+# Snapshots dated mid-year rather than Dec 31. Currently empty: the only such
+# snapshot was SpaceXAI mid-2026 (June 30, net of the Colossus capacity sold to
+# Anthropic/Google/Reflection), now held back from the mainline exports. The
+# mid-year machinery below stays wired up so it can be re-added by restoring one
+# entry here, e.g. {("SpaceXAI", 2026): "2026-06-30"}.
+MID_YEAR_SNAPSHOTS = {}
 
 
 def snapshot_name(lab, year):
@@ -108,7 +113,9 @@ def run_lab_samples():
     spacexai = flc.model_spacexai()
     samples[("SpaceXAI", 2024)] = spacexai["2024"]
     samples[("SpaceXAI", 2025)] = spacexai["2025"]
-    samples[("SpaceXAI", 2026)] = spacexai["h1_2026"]  # June 30, net of sales
+    # SpaceXAI mid-2026 (spacexai["h1_2026"], June 30 net of sales) is held back
+    # from the mainline exports for now — restore it alongside its LAB_YEAR_KEYS
+    # and MID_YEAR_SNAPSHOTS entries.
     return samples
 
 

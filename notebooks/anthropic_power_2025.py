@@ -27,8 +27,11 @@
 # simplifies everything: at a fixed power budget the **Nvidia mix and the TPU mix
 # buy about the same H100e per watt, while Trainium2 buys noticeably less**. So the
 # fleet collapses to two buckets — high-efficiency non-Trainium (Nvidia or TPU) and
-# lower-efficiency Trainium2 — and the single lever that moves H100e is the
-# **Trainium2 share of total power**, which we sweep.
+# lower-efficiency Trainium2 — and the main lever that moves H100e is the
+# **Trainium2 share of total power**, which we sweep. Both buckets' efficiencies
+# also carry sampled multipliers (§3): the non-Trainium one mirrors the
+# fleet-efficiency uncertainty the OpenAI model samples, and the Trainium2 one
+# covers its estimated TDP and Nvidia-derived power overhead.
 #
 # Unlike the OpenAI power model, there is no deployment-lag machinery here: the
 # memo's 1.4 GW is described as already *online*, and the mix is specified
@@ -262,6 +265,24 @@ plt.show()
 # Because the Nvidia and TPU mixes are so close, we treat all non-Trainium compute
 # as one high-efficiency bucket (their midpoint — the exact Nvidia:TPU split barely
 # matters) and let Trainium2 keep its 300k = 398 MW value.
+#
+# The bucket's efficiency itself is uncertain, though: the numbers above are
+# borrowed point values, while the OpenAI model samples the same quantities (its
+# deployment lag and server-to-IT overhead put OpenAI's realized H100e per MW at
+# roughly 0.83×–1.16× of the median). Anthropic's version of that uncertainty
+# should be at least as wide — the TPU side adds TDP-derived IT power with a
+# constant overhead and a generation mix read off sales data. So §5 multiplies the
+# bucket by a sampled efficiency factor, 90% CI **0.8–1.25** (`nontrainium_eff` in
+# the params sheet; geomean 1.0, so the median is untouched).
+#
+# The Trainium2 bucket gets the same treatment. Its 300k = 398 MW equivalency is
+# not an independent site measurement: Epoch's Frontier Data Centers methodology
+# builds it as ~500 W TDP (a SemiAnalysis estimate — AWS publishes no TDP) times a
+# 1.74× combined server+IT overhead **borrowed from the Nvidia GB200 NVL72
+# reference design**, i.e. ~870 W per chip. SemiAnalysis's own rack estimates
+# imply 750–845 W all-in (overhead 1.5–1.69×), so the point value sits at the
+# power-hungry end of the plausible range. `trainium_eff`, 90% CI **0.85–1.2**
+# (geomean ~1.01), collapses the TDP and overhead uncertainty into one multiplier.
 
 # %%
 nontrainium_per_mw = (nvidia_mix_per_mw + tpu_mix_per_mw) / 2
@@ -322,10 +343,12 @@ print(f'Anthropic end-2025 IT power (GW): {lo / 1000:.2f} / {mid / 1000:.2f} / {
 # power are sampled independently (scale and mix are largely separate questions).
 
 # %%
-def anthropic_h100e(total_power_mw, trainium_share):
-    """Total H100e for a power draw and a Trainium2 power share (either may be an
-    array of samples; the other broadcasts)."""
-    blended_per_mw = trainium_share * trainium2_per_mw + (1 - trainium_share) * nontrainium_per_mw
+def anthropic_h100e(total_power_mw, trainium_share, nontrainium_eff=1.0, trainium_eff=1.0):
+    """Total H100e for a power draw, a Trainium2 power share, and efficiency
+    multipliers on the two buckets (any may be an array of samples; the others
+    broadcast). The multipliers default to their medians, ~1.0."""
+    blended_per_mw = (trainium_share * trainium2_per_mw * trainium_eff
+                      + (1 - trainium_share) * nontrainium_per_mw * nontrainium_eff)
     return total_power_mw * blended_per_mw
 
 
@@ -333,12 +356,25 @@ def anthropic_h100e(total_power_mw, trainium_share):
 trainium_share_prior = PARAMS['trainium_share']
 trainium_share = trainium_share_prior @ N_SAMPLES
 
-# Headline Monte Carlo: power and share vary together.
-anthropic_h100e_samples = anthropic_h100e(power_samples_mw, trainium_share)
+# Efficiency multiplier on the non-Trainium bucket (§3): restores the
+# fleet-efficiency uncertainty the point specs strip out.
+nontrainium_eff = PARAMS['nontrainium_eff'] @ N_SAMPLES
+
+# Efficiency multiplier on the Trainium2 bucket (§3): its ~870 W per chip is an
+# estimated TDP times an Nvidia-derived overhead, both uncertain.
+trainium_eff = PARAMS['trainium_eff'] @ N_SAMPLES
+
+# Headline Monte Carlo: power, share, and both bucket efficiencies vary together.
+anthropic_h100e_samples = anthropic_h100e(power_samples_mw, trainium_share,
+                                          nontrainium_eff, trainium_eff)
 
 s_lo, s_mid, s_hi = percentiles(trainium_share)
+e_lo, e_mid, e_hi = percentiles(nontrainium_eff)
+t_lo, t_mid, t_hi = percentiles(trainium_eff)
 h_lo, h_mid, h_hi = percentiles(anthropic_h100e_samples)
 print(f'Trainium2 share prior (5th / median / 95th): {s_lo:.0%} / {s_mid:.0%} / {s_hi:.0%}')
+print(f'non-Trainium efficiency multiplier (5th / median / 95th): {e_lo:.2f} / {e_mid:.2f} / {e_hi:.2f}')
+print(f'Trainium2 efficiency multiplier (5th / median / 95th): {t_lo:.2f} / {t_mid:.2f} / {t_hi:.2f}')
 print(f'Anthropic end-2025 H100e (5th / median / 95th): {fmt(h_lo)} / {fmt(h_mid)} / {fmt(h_hi)}')
 
 # %%
@@ -407,18 +443,24 @@ plt.show()
 # %% [markdown]
 # ## 7. What drives the uncertainty
 #
-# Turn each input on alone (the other held at its median) to see how much of the
-# H100e spread it owns. The non-Trainium composition (Nvidia vs TPU) is left out —
-# §3 showed it barely moves the total.
+# Turn each input on alone (the others held at their medians) to see how much of
+# the H100e spread it owns. The non-Trainium *composition* (Nvidia vs TPU) is left
+# out — §3 showed it barely moves the total — but the two buckets' sampled
+# efficiency multipliers get their own rows.
 
 # %%
 share_median = float(np.median(trainium_share))
 power_median_mw = float(np.median(power_samples_mw))
+eff_median = float(np.median(nontrainium_eff))
+
+t_eff_median = float(np.median(trainium_eff))
 
 decomposition = {
-    'power only (share fixed)': anthropic_h100e(power_samples_mw, share_median),
-    'share only (power fixed)': anthropic_h100e(power_median_mw, trainium_share),
-    'both combined': anthropic_h100e_samples,
+    'power only (others fixed)': anthropic_h100e(power_samples_mw, share_median, eff_median, t_eff_median),
+    'share only (others fixed)': anthropic_h100e(power_median_mw, trainium_share, eff_median, t_eff_median),
+    'non-Trainium eff only (others fixed)': anthropic_h100e(power_median_mw, share_median, nontrainium_eff, t_eff_median),
+    'Trainium2 eff only (others fixed)': anthropic_h100e(power_median_mw, share_median, eff_median, trainium_eff),
+    'all combined': anthropic_h100e_samples,
 }
 
 fig, ax = plt.subplots(figsize=(11, 4))
@@ -445,7 +487,8 @@ for name, samples in decomposition.items():
 # ## 8. Sensitivity sweep: Trainium2 share from 10% to 90%
 #
 # §5 put a prior on the Trainium2 share. Here we drop that prior and instead fix
-# the share at each value from 10% to 90%, with only the power draw still sampled —
+# the share at each value from 10% to 90%, with only the power draw still sampled
+# (both efficiency multipliers sit at their medians, ~1.0) —
 # an explicit answer to "how wrong could the headline be if the mix evidence is
 # wrong?"
 #
@@ -493,10 +536,12 @@ print(f'\nFull 10%→90% sweep moves the median from {fmt(low_end_median)} (10% 
 # ## 9. Takeaways
 #
 # - **Headline: Anthropic had roughly 1.2M H100e online at end-2025**, with a 90%
-#   interval of about **0.85M–1.64M** — centered in the research summary's "≥1M,
-#   likely <1.5M" range, with tails now poking past it on both sides after the
-#   7/30 power-prior widening; ~68% of OpenAI's ~1.74M.
-# - **The estimate rests on two inputs: total power and the Trainium2 share.** The
+#   interval of about **0.84M–1.72M** — centered in the research summary's "≥1M,
+#   likely <1.5M" range, with tails poking past it on both sides after the 7/30
+#   power-prior widening and the 8/4 efficiency multipliers; ~68% of OpenAI's ~1.74M.
+# - **The estimate rests on four inputs: total power, the Trainium2 share, and the
+#   two bucket-efficiency multipliers (non-Trainium 0.8–1.25, Trainium2 0.85–1.2,
+#   §3).** The
 #   share prior (median ~52%, 90% CI 35–70%) is anchored on the site power in
 #   Epoch's data-center directory — New Carlisle ~626 MW at end-2025 plus Madison
 #   ~284 MW, with allowances for timing and non-Anthropic use (§5). It implies
@@ -508,4 +553,8 @@ print(f'\nFull 10%→90% sweep moves the median from {fmt(low_end_median)} (10% 
 #   anywhere from 10% to 90% (§8) only moves the median about ±10%. Tightening the
 #   power figure is the highest-leverage way to narrow the estimate.
 # - **Nvidia and TPU are interchangeable here** — within a few percent on H100e per
-#   watt (native-peak basis), so the non-Trainium split does not affect the total.
+#   watt (native-peak basis), so the non-Trainium *split* does not affect the total.
+#   Each bucket's overall efficiency level is still uncertain, though: the sampled
+#   multipliers together are the second-largest source of spread (§7) — ahead of
+#   the share, well behind power. Trainium2's point value in particular rests on an
+#   estimated ~500 W TDP times an Nvidia-derived 1.74× overhead (§3).
