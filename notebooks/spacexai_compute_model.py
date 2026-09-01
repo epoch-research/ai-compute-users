@@ -16,27 +16,13 @@
 # %% [markdown]
 # # SpaceXAI compute model
 #
-# A Monte Carlo estimate of the compute available to SpaceXAI — SpaceX's AI
-# segment (xAI + X, including Cursor) — at three snapshots: **end-2024**,
-# **end-2025**, and **mid-2026** (June 30), in H100-equivalents (H100e).
+# Estimates the compute available to SpaceXAI (xAI + X, including Cursor) at end-2024, end-2025, and mid-2026, in H100-equivalents (H100e).
 #
-# Nearly all of SpaceXAI's compute sits in two campuses — **Colossus 1**
-# (Memphis) and **Colossus 2** (Memphis/Southaven) — tracked with dated
-# capacity estimates in Epoch's
-# [AI Data Centers directory](https://epoch.ai/data/ai-data-centers/directory/colossus-2).
-# Following the approach of
-# [this gradient update](https://epoch.ai/gradient-updates/frontier-labs-dont-use-most-ai-compute),
-# the fleet is anchored directly on those estimates:
+# Nearly all of it is the two Colossus campuses, so the model is anchored on Epoch's [data-center capacity estimates](https://epoch.ai/data/ai-data-centers/directory/colossus-2) rather than chip-fleet accounting:
 #
 # > `SpaceXAI H100e = Colossus capacity + other compute − cloud sales`
 #
-# Colossus capacity at each snapshot is a **first-class distribution**,
-# derived in prose from the disclosure record in section 1.
-#
-# **Inputs are lognormal** unless noted, with low/high bounds read as the
-# **90% credible interval**. Units: chips are scored on dense 8-bit
-# throughput (GB300 ≈ GB200 ≈ 2.5 H100e); conversions that credit the GB300
-# at 3.2–3.4× H100 read Colossus 2 ~25% larger.
+# Colossus came online in phases. At each snapshot, capacity is the phases known to be complete plus the in-progress phase times a sampled share of it that was online. Distributions are lognormal unless noted, with bounds as 90% CIs. GB200/GB300 count as ~2.5 H100e (dense 8-bit).
 
 # %%
 import sys
@@ -47,7 +33,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import squigglepy as sq
-from squigglepy.numbers import K, M
+from squigglepy.numbers import K
 
 # Shared modules (lab_compute_utils, epoch_data) live at the repo root.
 sys.path.insert(0, str(Path('..').resolve()))
@@ -60,13 +46,11 @@ SLATE = "#24343B"       # SpaceXAI accent (near-black slate)
 SLATE_DARK = "#0F1419"
 RED = "#C25B4E"         # capacity sold to other labs
 
-
 def fmt(x):
     """Format an H100e count for labels (millions or thousands)."""
     if x >= 1e6:
         return f"{x / 1e6:.2f}M"
     return f"{x / 1e3:.0f}k"
-
 
 def summary(name, samples):
     """Print 5th / median / 95th and mean for a sample array.
@@ -82,16 +66,10 @@ def summary(name, samples):
     print(f"  mean   : {f(np.mean(samples))}")
     return p
 
-
 # %% [markdown]
-# ## Canonical parameters
+# ## Parameters
 #
-# The sheet (`lab_model_params.csv`) supplies the phase-timing, other-compute,
-# and cloud-sale priors. The **Colossus capacity distributions are defined in
-# this notebook** (sections 2–4), with their derivations in prose — the
-# sheet's `capacity_accuracy_*` rows are superseded and unused here, pending
-# removal. `model_spacexai()` in the frontier script still implements the
-# old accuracy-multiplier structure and no longer matches this notebook.
+# Sampled priors come from `lab_model_params.csv`. Colossus phase sizes are disclosure figures (S-1 chip counts, company announcements) and are literals in the code. `model_spacexai()` in the frontier script implements the same model; the last cell checks the two match.
 
 # %%
 from lab_compute_utils import load_lab_params, lab_params_table
@@ -100,35 +78,19 @@ PARAMS = load_lab_params()["spacexai"]
 lab_params_table("spacexai")
 
 # %% [markdown]
-# ## 1. The Colossus record: milestones, disclosures, and the earnings ladder
+# ## 1. Colossus milestones
 #
-# Epoch's data-center timelines give dated milestone H100e estimates per
-# site. The levels are better than typical satellite-derived estimates,
-# because for Colossus they are mostly *disclosures, converted*: Epoch's C2
-# levels are literally the S-1 chip counts × 2.527, with the satellite work
-# setting the dates and corroborating power. The record:
+# Epoch's timelines give dated H100e estimates per site. The phases used below:
 #
-# | Date | Disclosure | Source |
+# | Phase | H100e | Online |
 # |---|---|---|
-# | Sep 2024 | 100k H100s online | company announcement |
-# | Dec 2024 | "doubling to 200k complete" | company announcement (Epoch credits 200k only in Feb 2025) |
-# | Feb 2025 | 150k H100 + 50k H200 running jobs | company announcement |
-# | Jul 2025 | +30k B200s → C1 ≈ 276k H100e | press reports |
-# | Oct 2025 | C2 cluster 1: ~110k GB200, ~210 MW server power | **S-1, p. 76** |
-# | Apr 2026 | C2 cluster 2: 110k GB300, 220 MW | **S-1, p. 76** (satellite-dated) |
-# | May 2026 | All of C1: >220k GPUs, >300 MW | Anthropic announcement |
-# | Jun 2026 | C2 phase 3: ≥220k GB300, >400 MW | **S-1** (forward-looking); satellite: cooling supports ~850 MW IT, turbines ~900 MW |
-#
-# Every time a disclosure landed on a pre-existing Epoch estimate it
-# confirmed it to within ~10%, so the capacity distributions below are much
-# tighter than the data-center hub's generic "within 1.5x" — most of that
-# generic error budget is chip-count error (collapsed by the disclosures)
-# and timing error (handled per snapshot).
-#
-# **The Q2 2026 earnings call adds a company-level power ladder** — "1.4
-# gigawatts of nameplate compute, up from one gigawatt in Q1 and 400
-# megawatts a year earlier", guiding to ">2 GW" by end-2026. The deck never
-# defines "nameplate"; against Epoch's IT-power reads:
+# | Colossus 1, phase 1 (100k H100) | 100k | Sep 2024 |
+# | Colossus 1, phase 2 (second 100k Hoppers) | 100k | credited Feb 2025 |
+# | Colossus 1 complete (+30k B200) | 276k | Jul 2025 |
+# | Colossus 2, cluster 1 (~110k GB200) | 278k | Oct 2025 |
+# | Colossus 2, cluster 2 (110k GB300) | 278k | Apr 2026 |
+# | Colossus 2, phase 3 (≥220k GB300) | → 1.39M total | Jun 2026 |
+# | Colossus 2, next phase | +712k | ~Feb 2027 (projected) |
 
 # %%
 from epoch_data import load_data_center_timelines
@@ -141,49 +103,14 @@ SNAPSHOTS = {
     "mid-2026": pd.Timestamp("2026-06-30"),
 }
 
-
-def epoch_it_mw_at(when):
-    """Epoch's C1+C2 IT power (MW) at a date: last milestone at or before
-    the date per site, summed."""
-    total = 0.0
-    for site in ("Colossus 1", "Colossus 2"):
-        rows = (TIMELINES[TIMELINES["Data center"] == site]
-                .dropna(subset=["IT power (MW)"]).sort_values("Date"))
-        before = rows[rows["Date"] <= when]
-        if len(before):
-            total += float(before["IT power (MW)"].iloc[-1])
-    return total
-
-
-deck_ladder = [("2025-06-30", 400), ("2026-03-31", 1000), ("2026-06-30", 1400)]
-print("SpaceX Q2-2026 earnings 'nameplate compute' vs Epoch C1+C2 IT power:")
-for d, deck_mw in deck_ladder:
-    it = epoch_it_mw_at(pd.Timestamp(d))
-    print(f"  {d}:  deck {deck_mw:>5} MW   Epoch IT {it:>5.0f} MW   "
-          f"deck/Epoch {deck_mw / it:.2f}x")
-
-# %% [markdown]
-# The deck sits at or above Epoch's contemporaneous read at every date. The
-# Q1 gap is the informative one: 1.0 GW at March 31 exceeds C1 plus both C2
-# clusters (~830 MW IT), so it implies cluster 2 finished well before
-# Epoch's April 6 observation *and* ~37% of phase 3 was energized by
-# quarter-end. Only reading "nameplate" as facility power would put Epoch
-# above the deck, and that reading fits the ladder worst (end-2026 facility
-# would be ~2.9 GW against a ">2 GW" guide). Takeaway: Epoch's satellite
-# credits lag energization; disclosure-vs-Epoch disagreements are one-sided
-# (more capacity, earlier). This shapes the capacity distributions below.
-
 # %%
-# Milestone reference table and chart. The capacity distributions in
-# sections 2–4 are written as literals derived from these values — if a hub
-# data refresh moves this table, re-derive them.
+# Milestone reference table and chart.
 def site_milestones(site):
     """One site's dated milestone H100e estimates, sorted (milestones
     without an H100e estimate are skipped)."""
     rows = (TIMELINES[TIMELINES["Data center"] == site]
             .dropna(subset=["H100 equivalents"]).sort_values("Date"))
     return rows[["Date", "H100 equivalents"]].reset_index(drop=True)
-
 
 def interp_h100e_at(site, when):
     """Operational H100e at a date, interpolated linearly between milestones
@@ -193,14 +120,12 @@ def interp_h100e_at(site, when):
     target = (when - rows["Date"].iloc[0]).days
     return float(np.interp(target, days, rows["H100 equivalents"].to_numpy(dtype=float)))
 
-
 def level_at(site, when):
     """The last milestone level at or before a date (0 if none) — how a
     phase-built site reads at a snapshot."""
     rows = site_milestones(site)
     before = rows[rows["Date"] <= when]
     return float(before["H100 equivalents"].iloc[-1]) if len(before) else 0.0
-
 
 print(f"{'snapshot':>10}  {'C1 (interpolated)':>18}  {'C2 (level)':>11}  {'sum':>7}")
 for name, when in SNAPSHOTS.items():
@@ -242,28 +167,17 @@ ax.grid(alpha=0.25)
 plt.show()
 
 # %% [markdown]
-# ## 2. End-2024: Colossus 1 mid-ramp
+# ## 2. End-2024
 #
-# No filings exist for this period — the evidence is two company
-# announcements: **phase 1** (100k H100s) online in September, a hard floor;
-# and **phase 2** (the second 100k Hoppers, completing the 150k H100 + 50k
-# H200 configuration) credited by Epoch only in February. The sampled
-# quantity is **phase 2's completion share at Dec 31**: linear interpolation
-# between the milestones says 71%, xAI's December "doubling complete"
-# announcement says 100% (Epoch didn't buy it), and a back-loaded ramp
-# (H200s arriving late) pulls it down. Prior: normal, 90% CI 0.30–0.95,
-# median ~0.62 → Colossus ~162k, 90% CI ~130–195k.
+# Phase 1 (100k) is fixed. Phase 2 (the second 100k) was in progress at Dec 31: its completion share is sampled, normal with 90% CI 0.40–0.95 (linear interpolation between Epoch's milestones gives 0.71).
 #
-# **Other compute** is xAI's non-Colossus cloud capacity: the Oracle Grok-2
-# cluster (20k H100s) anchors the floor, and the S-1's 2024 AI R&D spend
-# ($1.176B, which also covers X R&D, staff/data, and Colossus depreciation)
-# caps the cloud bill at a ~$300M–$1B/yr run rate.
+# Other compute is non-Colossus cloud capacity, mainly the Oracle cluster used for Grok-2.
 
 # %%
 C1_PHASE1 = 100 * K   # online by September (company announcement)
 C1_PHASE2 = 100 * K   # the second 100k Hoppers, credited by Epoch in February
 
-c1_phase2_complete = sq.norm(0.30, 0.95, lclip=0, rclip=1) @ N_SAMPLES
+c1_phase2_complete = PARAMS["c1_phase2_complete_2024"] @ N_SAMPLES
 colossus_2024 = C1_PHASE1 + C1_PHASE2 * c1_phase2_complete
 other_2024 = PARAMS["other_compute_2024"] @ N_SAMPLES
 spacexai_2024 = colossus_2024 + other_2024
@@ -274,89 +188,43 @@ summary("Other sites + cloud purchases (end-2024)", other_2024)
 summary("SpaceXAI compute, end-2024", spacexai_2024);
 
 # %% [markdown]
-# ## 3. End-2025: a firm floor, upside from cluster 2
+# ## 3. End-2025
 #
-# The open level — C1 (~276k) plus C2 cluster 1 (~278k) ≈ **554k** — is
-# close to a floor: both components are floor-worded disclosures (">220,000
-# GPUs", "approximately 110,000 GB200") whose power arithmetic checks out
-# (C1's reported mix implies ~343 MW IT vs Epoch's 340 MW read; if the 30k
-# B200s were actually Hoppers the power wouldn't add up). Genuine downside
-# is a few percent of rounding, downtime, and residual mix error.
+# Colossus 1 (276k) and Colossus 2 cluster 1 (278k) are complete: 554k. Cluster 2 (278k) was under construction, and its share online is sampled in two parts:
 #
-# The sampled quantity is **C2 phase 2's completion share at Dec 31** — the
-# second cluster (the S-1's 110k GB300s ≈ 278k H100e, Epoch-dated April 6):
+# - probability that any of it was live: 0.33;
+# - if live, share ~ normal(0.20, 0.66), median 0.43 (the linear ramp from cluster 1's Oct 19 start to Epoch's Apr 6 completion date).
 #
-# - *Satellite says little*: Epoch's Jan 13 read shows the cluster's cooling
-#   still under construction — a back-loaded ramp.
-# - *The deck says a lot*: 1.0 GW nameplate at March 31 implies the cluster
-#   finished around mid-February with phase 3 already partly live — the
-#   buildout ran well ahead of the satellite credits.
-# - *Linear interpolation* between its Oct 19 start and either completion
-#   endpoint brackets the central scenarios (printed below): 43–62% done,
-#   Colossus ~674–726k.
-#
-# Prior: clipped normal, 90% CI 0–0.65, median ~0.33 — splitting the
-# satellite and deck stories, below the linear scenarios. Colossus lands at
-# median ~645k with a hard floor at the 554k open level.
+# So the share is 0 in the median case with a right tail. Other compute is bounded by the S-1's infrastructure-and-cloud expense lines.
 
 # %%
-# Colossus component sizes, from the section-1 record.
 C1 = 276 * K           # Colossus 1: 150k H100 + 50k H200 + 30k B200
-C2_CLUSTER1 = 278 * K  # Colossus 2 cluster 1: the S-1's 110k GB200s, online Oct 19
-C2_CLUSTER2 = 278 * K  # Colossus 2 cluster 2 (phase 2): the S-1's 110k GB300s, Epoch-dated Apr 6
-
-# Linear-interpolation scenarios for C2 cluster 2 at Dec 31, between its
-# Oct 19 start and the two completion endpoints.
-c2_start = pd.Timestamp("2025-10-19")
-for label, end in [("Epoch endpoint (observed Apr 6)", pd.Timestamp("2026-04-06")),
-                   ("deck-implied endpoint (~Feb 14)", pd.Timestamp("2026-02-14"))]:
-    frac = (SNAPSHOTS["end-2025"] - c2_start).days / (end - c2_start).days
-    print(f"{label}: cluster 2 {frac:.0%} done -> Colossus "
-          f"{fmt(C1 + C2_CLUSTER1 + frac * C2_CLUSTER2)}")
-print(f"floor (cluster 2 not started):      Colossus {fmt(C1 + C2_CLUSTER1)}")
+C2_CLUSTER1 = 278 * K  # Colossus 2 cluster 1: 110k GB200, online Oct 19 2025
+C2_CLUSTER2 = 278 * K  # Colossus 2 cluster 2: 110k GB300, Epoch-dated Apr 6 2026
 
 # %%
-c2_phase2_complete = sq.norm(0, 0.65, lclip=0, rclip=1) @ N_SAMPLES
-colossus_2025 = C1 + C2_CLUSTER1 + C2_CLUSTER2 * c2_phase2_complete
+# Share of cluster 2 online: zero unless any was live, else the share-if-live draw.
+p_any_live = PARAMS["c2_cluster2_any_live_2025"]            # sheet const, a plain float
+share_if_live = PARAMS["c2_cluster2_share_if_live_2025"]    # clipped normal
+c2_cluster2_complete = sq.mixture([sq.const(0), share_if_live],
+                                  [1 - p_any_live, p_any_live]) @ N_SAMPLES
+colossus_2025 = C1 + C2_CLUSTER1 + C2_CLUSTER2 * c2_cluster2_complete
 other_2025 = PARAMS["other_compute_2025"] @ N_SAMPLES
 spacexai_2025 = colossus_2025 + other_2025
 
-p = summary("C2 phase 2 completion share (Dec 31)", c2_phase2_complete)
-print(f"  P(none open) = {np.mean(c2_phase2_complete == 0.0):.0%}\n")
+p = summary("C2 cluster 2 share online (Dec 31)", c2_cluster2_complete)
+print(f"  P(any live) = {np.mean(c2_cluster2_complete > 0):.0%}\n")
 summary("Colossus operational (end-2025)", colossus_2025)
 summary("Other sites + cloud purchases (end-2025)", other_2025)
 summary("SpaceXAI compute, end-2025", spacexai_2025);
 
 # %% [markdown]
-# The upside-skewed treatment raises end-2025 ~12% over the previous
-# symmetric one (which centered on the 554k floor), landing at the top of
-# the gradient update's 600–700k range.
+# ## 4. Mid-2026: the fleet
 #
-# **Other compute** is bounded by the S-1's expense disclosures: the ~$1.8B
-# 2025 increase in infrastructure-and-cloud spending (much of it non-GPU
-# infrastructure, given GPU depreciation is booked separately) on the
-# $300M–$1B 2024 baseline implies a $1–2B/yr cloud spend rate, hard ceiling
-# ~$3B — ≈57–114k H100e at ~$2/H100e-hr.
-
-# %% [markdown]
-# ## 4. Mid-2026: the fleet, and which Colossus 2 phases are open
-#
-# Everything through C2's 400+ MW phase 3 reads firm at ~1.39M H100e: Epoch's
-# June 15 observation records phase 3 online (an infrastructure inference
-# from cooling/turbine capacity), and the deck's 1.4 GW nameplate at June 30
-# corroborates it — without phase 3, C1+C2 is only ~0.75 GW IT,
-# irreconcilable with the deck under any power definition.
-#
-# **Colossus firm capacity, mid-2026: `to(1.25M, 1.53M)`** — Epoch's 1.39M
-# ±10%, covering H100e-conversion and satellite power-read error; given the
-# one-sided deck-vs-Epoch pattern the residual risk leans up, not down.
-#
-# The **pending phase** is the projected ~Feb 2027 expansion (+712k H100e).
-# Fifteen days into a ~255-day buildout only a sliver can be energized: the
-# sampled fraction open is a clipped normal, median ~7% (sheet prior).
+# Everything through Colossus 2's 400+ MW phase 3 is treated as firm: `to(1.25M, 1.53M)`, Epoch's 1.39M ±10%. The next phase (+712k, projected ~Feb 2027) had been under way for 15 days, so the share open is a clipped normal with median ~7%.
 
 # %%
-colossus_firm_h1_2026 = sq.to(1.25 * M, 1.53 * M) @ N_SAMPLES
+colossus_firm_h1_2026 = PARAMS["colossus_firm_h1_2026"] @ N_SAMPLES
 C2_PENDING_FEB2027 = 712 * K
 phase_open = PARAMS["c2_next_phase_open_h1_2026"] @ N_SAMPLES
 
@@ -370,26 +238,17 @@ summary("Colossus operational (mid-2026)", colossus_h1_2026)
 summary("Total SpaceX fleet (mid-2026)", fleet_h1_2026);
 
 # %% [markdown]
-# ## 5. Mid-2026: netting out the cloud sales
+# ## 5. Mid-2026: cloud sales
 #
-# Three deals carve capacity out of the fleet from May–July 2026 (no
-# subtraction applies to the earlier snapshots):
+# Capacity SpaceX rents to other labs from May–July 2026 is subtracted:
 #
-# - **Anthropic**: all of Colossus 1 — subtracted at Epoch's 276k point
-#   level (C1 measurement error appears in both the fleet and the sale, so
-#   it nets out) — plus a uniform 0–95k H100e of possible spillover into C2:
-#   the S-1 places the capacity "across COLOSSUS and COLOSSUS II".
-# - **Google**: one of C2's two ~110k-GPU clusters (~278k H100e), ramping
-#   through September; the sampled June-30 share is `to(0.15, 0.5)`.
-# - **Reflection AI**: a small GB300 carve-out billing from July 1, the day
-#   after the snapshot — uniform 0–45k.
+# - Anthropic: all of Colossus 1 (276k, the same fixed level as in the fleet) plus uniform 0–95k of Colossus 2 spillover;
+# - Google: one 278k Colossus 2 cluster, ramping through September; June 30 share `to(0.15, 0.5)`;
+# - Reflection AI: carve-out billing from July 1; uniform 0–45k.
 #
-# **Cursor stays in**: the S-1 treats its compute agreement as an internal
-# allocation, not a sale.
+# Cursor's compute agreement is an internal allocation and stays in.
 
 # %%
-# The Anthropic sale is all of C1, the Google deal one C2 cluster — both
-# levels unchanged since end-2025, so the section-3 constants apply.
 anthropic_spillover = PARAMS["anthropic_c2_spillover"] @ N_SAMPLES
 anthropic_sold = C1 + anthropic_spillover
 
@@ -406,8 +265,7 @@ summary("Sold to Reflection AI", reflection_sold)
 summary("SpaceXAI compute, mid-2026", spacexai_h1_2026);
 
 # %%
-# Waterfall: the fleet at medians, less each sale, down to the internal
-# estimate (which carries the full 90% CI).
+# Waterfall at medians; the last bar carries the full 90% CI.
 wf_fleet = np.median(fleet_h1_2026)
 wf_sales = [("Anthropic", np.median(anthropic_sold)),
             ("Google", np.median(google_sold)),
@@ -443,13 +301,7 @@ ax.grid(alpha=0.25, axis="y")
 plt.show()
 
 # %% [markdown]
-# The medians in the waterfall don't difference exactly to the internal
-# median (medians aren't additive), but the gap is small. The internal
-# figure measures *access* rather than use: the sale contracts carry
-# 90–180-day cancellation windows and claw-back rights.
-
-# %% [markdown]
-# ## 6. Results across the three snapshots
+# ## 6. Results
 
 # %%
 def label_spans(ax, x, y, spans, pad_px=7):
@@ -459,7 +311,6 @@ def label_spans(ax, x, y, spans, pad_px=7):
         ax.figure.canvas.draw()
         x = ax.transData.inverted().transform(
             (t.get_window_extent().x1 + pad_px, 0))[0]
-
 
 results = [
     ("End-2024", spacexai_2024, None),
@@ -506,11 +357,9 @@ ax.set_title("SpaceXAI compute across the three snapshots",
 plt.show()
 
 # %% [markdown]
-# ## Sensitivity: what moves the mid-2026 estimate most
+# ## Sensitivity (mid-2026)
 #
-# A one-at-a-time sweep: each sampled input is pinned to its own 5th and
-# then 95th percentile while everything else keeps its full distribution;
-# the bar spans the resulting pair of medians.
+# Each input pinned at its 5th and then 95th percentile with everything else sampled; the bar spans the two resulting medians.
 
 # %%
 def internal_with(firm=None, phase=None, other=None, spill=None, ramp=None,
@@ -526,7 +375,6 @@ def internal_with(firm=None, phase=None, other=None, spill=None, ramp=None,
     fleet = firm + C2_PENDING_FEB2027 * phase + other
     sold = (C1 + spill) + C2_CLUSTER1 * ramp + refl
     return fleet - sold
-
 
 tornado_inputs = [
     ("Colossus firm capacity", "firm", colossus_firm_h1_2026),
@@ -568,14 +416,20 @@ ax.grid(alpha=0.25, axis="x")
 plt.show()
 
 # %% [markdown]
+# ## Cross-check against the frontier script
+
+# %%
+import frontier_lab_compute_model as frontier
+
+frontier_res = frontier.model_spacexai()
+assert np.allclose(frontier_res["2024"], spacexai_2024)
+assert np.allclose(frontier_res["2025"], spacexai_2025)
+assert np.allclose(frontier_res["h1_2026"], spacexai_h1_2026)
+print("matches frontier_lab_compute_model.model_spacexai exactly")
+
+# %% [markdown]
 # ## Bottom line
 #
-# - **End-2024: ~199k H100e** (90% CI ~162–236k). Company announcements
-#   only; C1 phase 2's completion share is the widest capacity input.
-# - **End-2025: ~708k H100e** (90% CI ~616–818k). Up ~12% from the previous
-#   symmetric treatment: the 554k open level is a disclosure-pinned floor,
-#   with C2 phase 2's completion share supplying the upside.
-# - **Mid-2026: ~1.10M H100e internal** (90% CI ~931k–1.28M), against a
-#   gross fleet of ~1.53M before the capacity sold to Anthropic, Google, and
-#   Reflection. The Q2 deck's 1.4 GW nameplate corroborates phase 3 being
-#   online at the snapshot.
+# - End-2024: ~203k H100e (90% CI ~171–237k).
+# - End-2025: ~635k H100e (90% CI ~587–787k).
+# - Mid-2026: ~1.10M H100e internal (90% CI ~929k–1.29M), from a ~1.53M gross fleet before cloud sales.

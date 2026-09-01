@@ -16,33 +16,11 @@
 # %% [markdown]
 # # Anthropic compute from cloud spend
 #
-# Everything Anthropic-related that starts from **reported cloud spending**
-# (\$2.5B in 2024, \$6.8B in 2025), in two parts:
+# Anthropic's compute estimated from its reported cloud spending: \$2.5B in 2024 and \$6.8B in 2025 (The Information).
 #
-# **Part A (sections 1–4): the canonical end-2024 estimate.** No power figure
-# exists for 2024 — the leaked ~1.4 GW describes end-**2025** — so the 2024
-# estimate converts spending directly: fit the spend trajectory to the two
-# annual totals, read off the end-2024 spending *rate*, and divide by what an
-# H100e-hour cost on 2024 contracts. Its priors live in `lab_model_params.csv`
-# and its structure in `frontier_lab_compute_model.py` (`model_anthropic_2024`,
-# which samples in the same order as sections 1–2, so the two match exactly
-# under the shared seed), exported to the tables and the compute page. An
-# experimental alternative — backcasting the end-2025 power fleet down the
-# spend curve — is kept in section 3 as a validating cross-check only: it
-# chains three multiplicative uncertain factors, so it is wider with a long
-# right tail, and its extra inputs are softer than the 2024 price evidence.
+# **Part A (sections 1–4): the canonical end-2024 estimate.** No power figure exists for end-2024, so spending is converted directly: fit a spending-rate curve to the two annual totals, read off the rate at end-2024, and divide by the 2024 cost of an H100e-hour. Priors are in `lab_model_params.csv`; `model_anthropic_2024()` in the frontier script implements the same model and section 2 checks the two match. Section 3 is an experimental alternative, backcasting the end-2025 power-model fleet, kept as a cross-check.
 #
-# **Part B (sections 5 on): the end-2025 cloud-spend cross-check.** The same
-# dollars pointed at 2025: a bottom-up two-bucket model (Nvidia at market
-# rental rates, Trainium2 at Amazon's cost times a markup) of what \$6.8B
-# bought, as a full-year average and an end-2025 snapshot. It is an *alternate*
-# to the canonical power-based end-2025 model (`anthropic_power_2025`), kept
-# for validation — its priors are notebook literals, not sheet rows.
-#
-# *Provenance:* merged 2026-07-30 from `anthropic_2024_backcast` (Part A) and
-# `anthropic_cloud_spend_monte_carlo` (Part B, where the 2024 backcast was
-# first developed as §9). The 2024 headline switched from an equal-weight
-# two-route mixture to the direct conversion alone earlier the same day.
+# **Part B (sections 5–12): an end-2025 cross-check.** The same dollars pointed at 2025: a two-bucket model (Nvidia at market rental rates, Trainium2 at Amazon's cost plus a markup) of what \$6.8B bought. The canonical end-2025 model is `anthropic_power_2025`; Part B's priors are notebook literals.
 
 # %%
 import sys
@@ -61,80 +39,37 @@ from lab_compute_utils import load_lab_params
 N_SAMPLES = 5000
 HOURS_PER_YEAR = 8760
 
-
 def fmt(value):
     """Format an H100e count as a short string (millions or thousands)."""
     if abs(value) >= 1e6:
         return f'{value / 1e6:.2f}M'
     return f'{value / 1e3:,.0f}k'
 
-
 def percentiles(samples):
     """Return (5th, 50th, 95th) percentiles of a sample array."""
     p = sq.get_percentiles(samples, percentiles=[5, 50, 95])
     return p[5], p[50], p[95]
 
-
 def show(label, samples):
     lo, mid, hi = percentiles(samples)
     print(f'   {label:34s}: {fmt(lo)} / {fmt(mid)} / {fmt(hi)}')
 
-
 # %% [markdown]
 # ## 1. The spending trajectory
 #
-# Anthropic reportedly spent **\$2.5B on cloud compute in 2024** and **\$6.8B in
-# 2025** (The Information; sampled as correlated lognormals, since both come from
-# the same reporting). Those are full-year *totals* — what the conversion needs
-# is the *rate* of spending right at each year-end.
+# Anthropic reportedly spent \$2.5B on cloud compute in 2024 and \$6.8B in 2025 (The Information). Those are full-year totals; the goal here is the *rate* of spending at the end of 2024, which is what converts to a fleet size. The two totals are sampled as correlated lognormals (both come from the same reporting).
 #
-# If the spending rate grew smoothly (exponentially) through 2025, the two totals
-# pin down the average growth — about 2.7× per year — and the only remaining
-# question is *when* within the year the ramp happened. A **growth-shape factor**
-# (90% CI 0.9–1.5) covers that: below 1 means front-loaded (spending arrived
-# early, so the year started at a high rate), above 1 means back-loaded. The
-# range leans back-loaded and is narrower than pure ignorance would be — the
-# external evidence walked through below pins the plausible timing. The
-# end-2024 rate is then simply where the 2025 curve starts — end-2025 divided by
-# one year of within-2025 growth. Conveniently, no 2023 data is needed.
+# If the spending rate grows exponentially, the ratio of the two totals fixes the average growth rate (~2.7× per year) but not *when* within each year the money arrived. The **growth-shape factor** handles this. It scales the within-2025 growth rate relative to that average:
 #
-# ### What the shape factor looks like
+# - **shape 1**: one smooth exponential through both years;
+# - **shape below 1 (front-loaded)**: 2025's spending arrived early, so the year had to *start* at a high rate. That means a steep 2024 ramp and a high end-2024 rate;
+# - **shape above 1 (back-loaded)**: 2025's ramp was steep, so the year started low. 2024 is nearly flat and the end-2024 rate is low.
 #
-# The chart below makes the shape factor concrete. Each curve is a spending path
-# that hits the same two annual totals — the areas under all three curves are
-# identical (\$2.5B over 2024, \$6.8B over 2025). What differs is *when* within
-# each year the money arrived:
+# The end-2024 rate is the end-2025 rate divided by one year of within-2025 growth, so the shape factor is what sets it. No 2023 data is needed.
 #
-# - **Shape 1** is the single smooth exponential through both years: within-2025
-#   growth equals the average 2024-to-2025 growth.
-# - **Shape 0.6 (front-loaded)**: 2025's spending arrived early, so the year had
-#   to *start* high — a steep 2024 ramp into a high end-2024 rate, then a
-#   flatter 2025. (Shown to make the case against low shapes — it sits outside
-#   the prior chosen below.)
-# - **Shape 1.5 (back-loaded)**: 2025's ramp was steep, so the year started
-#   low — 2024 is nearly flat and the end-2024 rate is low. (The prior's high
-#   end.)
+# The chart below draws three spending paths that hit the same two annual totals (equal areas under each curve over each year) and differ only in shape; the end-2024 rate is where each crosses the year boundary. Two reference points are overlaid: SemiAnalysis's quarterly Anthropic cost build (calibrated to the same annual totals, so it speaks to shape rather than level) and the WSJ's reported Q1-2026 compute and infrastructure cost of \$3.4B (~\$13.6B/yr). The quarterly build tracks the smooth curve through 2024 and runs a little steeper through 2025, equivalent to a shape of ~1.3.
 #
-# The end-2024 run-rate — the quantity this section is after — is simply the
-# height where each curve crosses the year boundary.
-#
-# **Two external reference points are overlaid.** **SemiAnalysis's quarterly
-# Anthropic build** (their training costs + inference COGS, annualized at
-# quarter midpoints) is calibrated to the same annual totals, so it speaks to
-# the *shape* of the ramp, not the level; it dips at the year boundary, where
-# they assume a large per-token cost drop, and accelerates sharply at Q1-2026,
-# just past the window this backcast uses. Separately, the WSJ *reported*
-# Anthropic's Q1-2026 **compute and infrastructure costs as \$3.4B**
-# (~\$13.6B/yr annualized; the definition may not match SA's exactly —
-# [WSJ](https://www.wsj.com/tech/ai/mind-blowing-growth-is-about-to-propel-anthropic-into-its-first-profitable-quarter-7edbf2f4)).
-#
-# Together they motivate the model's shape prior of **0.9–1.5**, rather than a
-# diffuse 0.6–1.6: the quarterly path hugs the smooth curve through 2024 and
-# crosses the boundary right at its rate, then runs a little steeper through
-# 2025 (equivalent to a shape of ~1.3). The extremes miss on both sides —
-# front-loaded needs a steeper 2024 ramp than the build shows and finishes
-# 2025 well below the Q1-26 anchors, while heavily back-loaded implies a
-# nearly flat 2024 that the build contradicts.
+# Prior: 90% CI 0.9–1.5.
 
 # %%
 # SemiAnalysis's Anthropic financial model, quarterly training costs + inference
@@ -163,7 +98,6 @@ wsj_x, wsj_y = 2026.125, WSJ_Q1_2026_COSTS * 4 / 1e3
 ILLUS_2024_TOTAL, ILLUS_2025_TOTAL = 2.5, 6.8
 illus_avg_growth = np.log(ILLUS_2025_TOTAL / ILLUS_2024_TOTAL)
 
-
 def solve_2024_growth(boundary_rate):
     """Within-2024 growth rate that ends the year at the boundary rate while
     integrating to the 2024 total (bisection; the integrated fraction of the
@@ -177,7 +111,6 @@ def solve_2024_growth(boundary_rate):
         else:
             hi = mid
     return (lo + hi) / 2
-
 
 fig, ax = plt.subplots(figsize=(9.5, 5))
 t = np.linspace(0, 1, 101)
@@ -215,9 +148,7 @@ plt.show()
 # %% [markdown]
 # ### Sampling the trajectory
 #
-# The fitted run-rate curve is then charted against the same two reference
-# points; the WSJ point lands between the fitted end-2025 rate and
-# SemiAnalysis's steeper Q1-26 build.
+# The run-rate curve sampled from the sheet priors, against the same two reference points.
 
 # %%
 # Priors from the sheet, sampled in the same order as the frontier script's
@@ -303,31 +234,9 @@ plt.show()
 # %% [markdown]
 # ## 2. The mainline estimate: dollars into chips at 2024 prices
 #
-# The direct conversion. A rented fleet that costs some dollar rate per
-# H100e-hour, billed around the clock, burns that rate × 8,760 hours per year
-# for each chip — so the end-2024 fleet is just the end-2024 spending rate
-# divided by the annual cost of one H100e.
+# A rented chip billed around the clock costs its hourly rate × 8,760 per year, so the end-2024 fleet is the end-2024 spending rate divided by the annual cost of one H100e.
 #
-# The price: in 2024 there was no Trainium2 to buy (Project Rainier was only
-# announced in December 2024), so Anthropic's fleet was Hopper on long-term
-# contracts plus a TPU v5e slice.
-# [SemiAnalysis's GPU pricing index](https://semianalysis.com/gpu-pricing-index/)
-# puts 1-year H100 contracts at ~\$3/hr through 2023, falling to the low-\$2s
-# through 2024. Anthropic's effective rate should sit below that curve:
-# multi-year terms price at a discount to 1-year, Anthropic has scale and
-# pricing power with its closely tied cloud providers, and custom chips (the
-# TPU slice) entered the mix in 2024. But it can also sit above pure GPU-hour
-# pricing, because "compute spend" plausibly includes auxiliary costs — storage,
-# networking, CPU fleets — beyond GPU-hours. The sheet prior: **\$1.50–2.50 per
-# H100e-hour**.
-#
-# One offsetting pair we treat as a wash: long-term contracts mean the fleet
-# doesn't reprice onto each quarter's cheaper deals (pushing the effective rate
-# up), but long-term pricing is smoother and lower to begin with (pushing it
-# down).
-#
-# The remaining assumption: every chip is billed around the clock at the
-# contract rate.
+# Price prior: \$1.50–2.50 per H100e-hour. Anthropic's 2024 fleet was Hopper on long-term contracts plus a TPU v5e slice (no Trainium2 yet). One-year H100 contracts ran ~\$3/hr in 2023 and the low \$2s through 2024, with multi-year terms below that; the upper end allows for "compute spend" including storage, networking, and CPU costs beyond GPU-hours.
 
 # %%
 price_2024 = PARAMS['effective_price_2024'] @ N_SAMPLES  # $ per H100e-hour
@@ -350,56 +259,14 @@ print('matches frontier_lab_compute_model.model_anthropic_2024 exactly')
 # %% [markdown]
 # ## 3. Experimental cross-check: backcasting the end-2025 fleet
 #
-# **Not used for the headline.** This alternative route is kept as a
-# validating cross-check: it anchors on the power model's end-2025 fleet
-# instead of 2024 prices, so agreement between the two routes is evidence the
-# headline isn't badly wrong, and their gap measures the tension between the
-# money and power anchors. It stays experimental because it chains three
-# multiplicative uncertain factors — so it is wider, with a long right tail
-# where a big fleet read, a front-loaded 2025, and a near-capped price ratio
-# line up — and because its extra inputs (the leaked ~1.4 GW read, the 2025
-# Trainium2 price structure) are judgment-heavier than the direct route's.
+# Not used for the headline. This route starts from the power model's end-2025 fleet and shrinks it twice:
 #
-# The idea: start from the end-2025 fleet and shrink it twice,
+# > end-2024 fleet = end-2025 fleet × spending ratio × price ratio
 #
-# > end-2024 fleet = end-2025 fleet × (spending ratio) × (price ratio)
+# - **Spending ratio**: end-2024 rate over end-2025 rate, from the section 1 curve (median ~0.31).
+# - **Price ratio**: how much cheaper an H100e-hour was at end-2025 than in 2024. The 2025 price blends Nvidia at \$1.3–1.8 per H100e-hour with Trainium2 at Amazon's ~\$0.66/chip-hour cost times a 1.0–1.6× markup (~\$1.0–1.6 per H100e-hour), Trainium2 taking 40–70% of spend. The 2024 price and the 2025 Nvidia price are correlated (0.5); the ratio is capped at 0.9.
 #
-# The **spending ratio** comes straight from the fitted curve in section 1:
-# the end-2024 rate is the end-2025 rate discounted by one year of within-2025
-# growth (median ~0.31).
-#
-# The **price ratio** asks how much cheaper an H100e-hour was at end-2025 than
-# in 2024 — cheaper dollars mean the fleet shrinks *less* than spending does.
-# Two transparent assumptions drive it:
-#
-# - **Nvidia prices fell.** Hopper rentals cheapened as Blackwell arrived, and
-#   Blackwell rents at better dollars-per-H100e; the 2025 Nvidia blend is
-#   sampled at **\$1.3–1.8 per H100e-hour** (vs \$1.50–2.50 effective in 2024).
-#   That is roughly the 1-year contract index's late-2025 level; 3-year terms
-#   price a bit cheaper, roughly counteracting the legacy-contract effect.
-# - **ASICs took a large share of spend.** Trainium2 is priced near Amazon's
-#   ~\$0.66/chip-hour cost times a **1.0–1.6× markup**; at ~0.66 H100e per
-#   chip that is roughly \$1.0–1.6 per H100e-hour. Its share of Anthropic's
-#   2025 spend is sampled at **40–70%**.
-#
-# Each dollar buys compute from whichever bucket it lands in, so the blended
-# 2025 price is the spend-weighted harmonic mix of the two bucket prices.
-#
-# The 2024 effective price and the 2025 Nvidia blend are **correlated (0.5)**:
-# they reflect the same rental market, so a world where Anthropic's 2024 rate
-# was high is likelier to have pricier 2025 rentals too. This trims the tails
-# of the price ratio. On top of that the ratio is **capped at 0.9**: end-2025
-# compute was at least ~10% cheaper per H100e-hour than the 2024 effective
-# rate. These priors are notebook literals, not sheet rows — deliberately, as
-# this route is not canonical.
-#
-# **The starting point** is the canonical power-based model in the frontier
-# script, which turns the leaked ~1.4 GW figure into chips via a
-# Trainium2-vs-everything-else blend of compute-per-watt. One mechanical note:
-# the frontier models reseed the shared random stream, so we run them here,
-# give the anchor samples a fixed shuffle, and draw this route's own inputs
-# from a different seed. That keeps the anchor and the inputs statistically
-# independent (fleet size and spend trajectory are separate questions).
+# These priors are notebook literals. The end-2025 anchor is the frontier script's power model; its samples are shuffled and this route's inputs drawn from a separate seed so the two are independent.
 
 # %%
 openai_res = frontier.model_openai()   # Anthropic borrows Nvidia specs from this
@@ -449,18 +316,7 @@ show('END-2024 H100e (backcast)', h100e_backcast)
 # %% [markdown]
 # ## 4. How the cross-check lands
 #
-# The two routes share the spending trajectory and the 2024-price prior — they
-# differ in what anchors the *level*. The headline trusts the 2024 sticker
-# price; the experimental backcast trusts the power model's end-2025 fleet and
-# the 2025 price structure. Any gap between them is the disagreement between
-# "what the money should have bought" and "what the power model says Anthropic
-# had", carried back one year at the fitted spending ratio.
-#
-# The backcast's median runs ~1.23× the headline's — equivalently, it implies
-# Anthropic effectively paid ~\$1.55/H100e-hr in 2024, inside (if below the
-# median of) the \$1.50–2.50 sticker prior. So the cross-check brackets the
-# headline from above rather than contradicting it; an earlier revision mixed
-# the two routes 50/50, which sat ~10% above the current headline.
+# The two routes share the spending trajectory and the 2024 price prior and differ in what sets the level: the 2024 price, or the power model's end-2025 fleet. The backcast's median runs ~1.2× the headline, equivalent to an effective 2024 price of ~\$1.58/H100e-hour, inside the prior.
 
 # %%
 print('Headline vs the experimental cross-check (5th / median / 95th):')
@@ -495,45 +351,23 @@ plt.show()
 #
 # # Part B: the end-2025 cloud-spend cross-check
 #
-# The same dollars pointed at 2025. This is an **alternate** estimate of
-# Anthropic's 2025 compute, built bottom-up from cloud spend rather than from a
-# power figure; the canonical end-2025 model (`anthropic_power_2025`) anchors
-# on the leaked 1.4 GW. Starting from the **\$6.8B of 2025 cloud spend**, the
-# natural output is a **2025 full-year average**; section 12 rescales it to an
-# **end-2025 snapshot** using the year-end run-rate from section 1. The average
-# comes in *below* the power snapshot because the fleet grew through the year
-# (same gap the OpenAI spend vs. power models showed).
+# An alternate estimate of Anthropic's end-2025 compute from the \$6.8B of 2025 cloud spend. The natural output is a 2025 full-year average; section 12 rescales it to an end-2025 snapshot with the year-end run-rate from section 1.
 #
-# The fleet is split into just **two buckets** (ignoring TPU, per the brief):
+# The fleet is two buckets (TPU ignored):
 #
-# - **Nvidia** — Hopper + Blackwell, using the *same* count mix and per-chip
-#   specs as the OpenAI model, priced at market GPU-hour **rental** rates.
-# - **Trainium2** — priced off SemiAnalysis's published **total cost of
-#   ownership of \$0.66/chip-hour**. Crucially that is *Amazon's* cost, not the
-#   price Amazon charges Anthropic, so an uncertain **cloud markup** goes on
-#   top.
+# - **Nvidia**: Hopper + Blackwell in the OpenAI model's count mix, priced at market rental rates.
+# - **Trainium2**: priced at Amazon's total cost of ownership (\$0.66/chip-hour, SemiAnalysis) times an uncertain cloud markup.
 #
-# The single biggest lever is how much of the spend goes to Trainium, so — like
-# the power notebook — we pick a central assumption and then **sweep the
-# Trainium share** across its full range. Priors here are notebook literals
-# (this part is a cross-check, not canonical).
+# The Trainium2 share of spend is the main lever, so the model runs at a central share and then sweeps it.
 
 # %%
 BUCKET_COLORS = {'Hopper': '#76b900', 'Blackwell': '#1a73e8', 'Trainium2': '#e8710a'}
 sq.set_seed(2025)  # part B's own draws, independent of parts A's streams
 
 # %% [markdown]
-# ## 5. Chip specs and the Hopper:Blackwell ratio, from the OpenAI model
+# ## 5. Chip specs and the Hopper:Blackwell ratio
 #
-# Exactly as the power-based Anthropic model does, we read two things off the
-# canonical OpenAI run (`openai_res`, computed in section 3) so the estimates
-# stay consistent:
-#
-# - **Per-chip H100e** for the Nvidia parts.
-# - **OpenAI's end-2025 Hopper:Blackwell count ratio.** OpenAI also carries
-#   trace A100 and some GB300; we drop the A100 and fold GB300 into the
-#   Blackwell bucket, leaving a clean Hopper-vs-Blackwell split we reuse for
-#   Anthropic's Nvidia mix.
+# Per-chip H100e and OpenAI's end-2025 Hopper:Blackwell count ratio are read off the canonical OpenAI run (A100 dropped, GB300 folded into Blackwell).
 
 # %%
 openai_counts = openai_res['counts']
@@ -556,25 +390,11 @@ print(f'   Hopper:Blackwell count ratio = {hopper_per_blackwell:.2f} : 1')
 print(f'   Trainium2 : {TRAINIUM2_H100E:.3f} H100e/chip (independent spec)')
 
 # %% [markdown]
-# ## 6. Pricing assumptions
+# ## 6. Pricing
 #
-# **Nvidia (market rental, $/GPU-hour).** Same two scenarios the OpenAI spend
-# model uses, taken from the research summary:
+# Nvidia rental rates (\$/GPU-hour), correlated so a high-price world lifts both: Hopper \$1.50–2.00, Blackwell \$3.00–4.00 (SemiAnalysis's Aug-2025 3-year-contract survey at the low end, the Silicon Data spot index at the high end).
 #
-# - low: Hopper \$1.50, Blackwell \$3.00 (SemiAnalysis Aug-2025 3-year-contract survey)
-# - high: Hopper \$2.00, Blackwell \$4.00 (Silicon Data spot index, early 2026)
-#
-# We treat each scenario edge as a 90% interval and **correlate** Hopper and
-# Blackwell (a high-price world lifts both together).
-#
-# **Trainium2 ($/chip-hour).** SemiAnalysis puts the *total cost of ownership* of a
-# Trainium2 (Teton2-PD-Ultra-3L) cluster at **\$0.66/chip-hour** — capital plus
-# operating, from **Amazon's** point of view. (For reference its GB200 NVL72 TCO is
-# \$2.36, so on a pure-cost basis Trainium2 is far cheaper per chip-hour.) The price
-# Amazon actually *charges Anthropic* is TCO plus an uncertain **cloud margin**. We
-# model that as a markup multiplier with a 90% range of **1.0–1.6×** (median ~1.26):
-# the low end reflects Anthropic's unusually deep Amazon relationship (near-cost
-# access), the high end a more normal cloud margin.
+# Trainium2: Amazon's \$0.66/chip-hour cost times a markup with 90% CI 1.0–1.6× (near-cost access at the low end, a normal cloud margin at the high end).
 
 # %%
 TRAINIUM2_TCO = 0.66  # $/chip-hour, Amazon's cost (SemiAnalysis)
@@ -598,18 +418,12 @@ for name, arr in [('Hopper', hopper_price), ('Blackwell', blackwell_price),
 # %% [markdown]
 # ### What a dollar buys in each bucket
 #
-# The whole model turns on **H100e bought per dollar of annual spend**, which is
-# just the per-chip H100e divided by a year of rental cost (`price × 8760`). This
-# is where Trainium's advantage — and its dependence on the markup — shows up. At a
-# near-cost markup Trainium buys clearly more H100e per dollar than Nvidia; at a
-# full cloud margin the advantage mostly disappears, consistent with the summary's
-# "non-Nvidia cheaper per dollar, but well under 2×."
+# H100e per dollar of annual spend: per-chip H100e divided by a year of rental (price × 8,760).
 
 # %%
 def h100e_per_dollar_year(per_chip_h100e, price_per_hour):
     """H100e bought per $1 of annual spend on a chip rented all year."""
     return per_chip_h100e / (price_per_hour * HOURS_PER_YEAR)
-
 
 # Express per $1B/year so the numbers are readable.
 buckets_per_b = {
@@ -636,15 +450,9 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# ## 7. Spend: reuse the section-1 trajectory
+# ## 7. Spend
 #
-# Part A already sampled everything this needs, from the sheet priors: the
-# correlated 2024/2025 full-year totals and the year-end run-rate under the
-# growth-shape factor. (When this cross-check was a standalone notebook it drew
-# its own copies with a wider 0.6–1.6 shape prior; merging unified them on the
-# canonical 0.9–1.5.) Sections 8–11 feed in the 2025 *total* and give a
-# full-year average; section 12 feeds in the *year-end run-rate* for the
-# snapshot.
+# The 2025 total and the end-2025 run-rate come from the section 1 samples. Sections 8–11 use the total (full-year average); section 12 uses the run-rate (snapshot).
 
 # %%
 spend = spend_2025_total        # sections 8-11: the full-year average
@@ -659,12 +467,7 @@ print(f'   year-end / full-year average: {np.median(spend_2025_end) / np.median(
 # %% [markdown]
 # ## 8. The model
 #
-# Split the spend into a Trainium2 slice and an Nvidia slice by the **Trainium
-# share of spend**. Within the Nvidia slice, split between Hopper and Blackwell so
-# the resulting *chip counts* keep OpenAI's borrowed Hopper:Blackwell ratio — given
-# that ratio and the two prices, the dollar split is pinned. Each slice then
-# converts dollars to an annual-average chip count (`dollars ÷ price ÷ 8760`) and
-# on to H100e.
+# Spend splits into Trainium2 and Nvidia slices by the Trainium2 share. Within Nvidia, the dollar split between Hopper and Blackwell is set so the chip counts keep the borrowed count ratio. Each slice converts dollars to chips (dollars ÷ price ÷ 8,760) and on to H100e.
 
 # %%
 # With a Hopper:Blackwell count ratio of r:1 and per-hour prices, the share of
@@ -672,7 +475,6 @@ print(f'   year-end / full-year average: {np.median(spend_2025_end) / np.median(
 # costs price_B). This varies per sample because prices do.
 hopper_spend_share = (hopper_per_blackwell * hopper_price) / (
     hopper_per_blackwell * hopper_price + blackwell_price)
-
 
 def anthropic_spend_h100e(total_spend, trainium_spend_share):
     """Annual-average H100e by bucket for the given spend (array) and Trainium2
@@ -699,15 +501,10 @@ def anthropic_spend_h100e(total_spend, trainium_spend_share):
         'total_h100e': sum(h100e.values()),
     }
 
-
 # %% [markdown]
-# ## 9. Central estimate and the Trainium-share sweep
+# ## 9. Central estimate and the Trainium2-share sweep
 #
-# **Central assumption: Trainium2 takes ~55% of the spend.** Trainium is the
-# largest single piece of Anthropic's fleet (Project Rainier plus the Mississippi
-# campus), but it is cheaper per chip-hour, so its *dollar* share sits a bit below
-# its *compute* share. We report the full distribution at 55% and then sweep the
-# share from 0 to 90%.
+# Central assumption: Trainium2 takes 55% of spend (below its compute share, since it is cheaper per chip-hour). The share is then swept from 0 to 90%.
 
 # %%
 CENTRAL_TRAINIUM_SHARE = 0.55
@@ -774,11 +571,7 @@ plt.show()
 # %% [markdown]
 # ## 10. Cross-check: implied Trainium2 chip count
 #
-# Each spend share implies an annual-average Trainium2 chip count. The bottom-up
-# evidence — Project Rainier (~700k Trainium2 by end-2025) plus the Mississippi
-# campus — points to several hundred thousand Trainium2 chips, though those are
-# *year-end* figures while this model is a *full-year average*, so the average
-# should sit somewhat lower.
+# Each spend share implies a full-year-average Trainium2 count, for comparison with the several hundred thousand chips at Project Rainier and the Mississippi campus at year-end (year-end figures, so the average should sit lower).
 
 # %%
 print(f'{"Trainium2 spend share":>22} {"Total H100e (median)":>20} {"Trainium2 chips (median)":>26}')
@@ -791,12 +584,10 @@ for share in table_shares:
 # %% [markdown]
 # ## 11. What drives the uncertainty
 #
-# At the central share, turn each random input on alone (others held at their
-# median) to see which spreads the full-year H100e the most.
+# At the central share, each input varied alone with the others at their medians.
 
 # %%
 median_spend = float(np.median(spend))
-
 
 def with_fixed_prices():
     """H100e at the central share with prices/markup held at their medians, so
@@ -812,12 +603,10 @@ def with_fixed_prices():
     hopper_price, blackwell_price, trainium_price, hopper_spend_share = saved
     return out
 
-
 def with_fixed_spend():
     """H100e at the central share with spend held at its median, so only
     prices/markup vary."""
     return anthropic_spend_h100e(np.full(N_SAMPLES, median_spend), CENTRAL_TRAINIUM_SHARE)
-
 
 decomposition = {
     'spend only': with_fixed_prices(),
@@ -847,15 +636,9 @@ for name in sources:
     print(f'   {name:24s}: {fmt(lo)} / {fmt(mid)} / {fmt(hi)}')
 
 # %% [markdown]
-# ## 12. End-2025 snapshot: plug in the year-end run-rate
+# ## 12. End-2025 snapshot
 #
-# Sections 8–11 used the full-year total and gave an *average*. Feeding the
-# **end-2025 annualized run-rate** (section 1) through the very same model
-# instead gives an **end-2025 snapshot** — the apples-to-apples comparison with
-# the power model's year-end figure. Because the model is linear in spend, this
-# is just the average scaled up by the year-end-to-average ratio, but running
-# it through keeps the full uncertainty (now including the growth shape)
-# attached.
+# The same model fed the end-2025 run-rate instead of the full-year total. The model is linear in spend, so this is the average scaled by the year-end-to-average ratio, with the growth-shape uncertainty attached.
 
 # %%
 central_end = anthropic_spend_h100e(spend_2025_end, CENTRAL_TRAINIUM_SHARE)
@@ -910,27 +693,7 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# ## Takeaways
+# ## Bottom line
 #
-# **Part A (canonical end-2024):** ~206k H100e (90% CI ~141k–297k) from the
-# direct conversion; the experimental power backcast lands ~1.23× higher and
-# brackets it from above.
-#
-# **Part B (end-2025 cross-check):**
-#
-# - **Two outputs from the same dollars.** The 2025 *full-year average*
-#   describes the year as a whole; the *end-2025 snapshot* describes the fleet
-#   at year-end, after the spend ramp. The snapshot is the right number to set
-#   beside the power model's year-end figure.
-# - **The snapshot lands inside the power model's CI.** Scaling the average up
-#   by the year-end run-rate puts it in the lower half of the power model's
-#   0.85–1.64M band — the two methods are roughly consistent once put on the
-#   same (year-end) footing.
-# - **The Trainium markup is the hidden swing factor.** Because Trainium is
-#   priced off Amazon's \$0.66 cost, whether Anthropic pays near cost or a full
-#   cloud margin changes how much compute each Trainium dollar buys — amplified
-#   by a bigger Trainium share.
-# - This stays a rough alternate. The cleanest ways to tighten it are a better
-#   Trainium markup estimate, a firmer Trainium-share figure (via the
-#   chip-count cross-check), and a within-year (e.g. quarterly) spend figure to
-#   pin the growth shape instead of perturbing it.
+# - **Part A, end-2024: ~206k H100e** (90% CI ~141k–297k). The experimental backcast runs ~1.2× higher.
+# - **Part B, end-2025 snapshot: ~970k H100e** (90% CI ~0.7M–1.4M) at a 55% Trainium2 spend share, in the lower half of the power model's 0.84M–1.72M band. The Trainium2 markup is the main swing factor beyond spend itself.

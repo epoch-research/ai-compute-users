@@ -24,8 +24,8 @@ Besides the end-2025 headline models, section 5 holds end-2024 backcasts for
 Google DeepMind, Meta AI (pre-MSL), and Anthropic. OpenAI's end-2024 falls out
 of model_openai() (its power series is per-year). Section 6 holds the SpaceXAI model, which
 produces three snapshots at once (end-2024, end-2025, and mid-2026) from
-Epoch's dated Colossus capacity estimates; the mid-2026 snapshot nets out the
-capacity SpaceX sells to other labs.
+the Colossus disclosure record as dated by Epoch's data-center timelines; the
+mid-2026 snapshot nets out the capacity SpaceX sells to other labs.
 
 Each model also records the intermediate quantities behind its final
 distribution in MODEL_STEPS (pure bookkeeping, no effect on results), which
@@ -48,8 +48,7 @@ HERE = Path(__file__).resolve().parent
 
 sys.path.insert(0, str(HERE))  # so sibling modules resolve from any cwd
 from lab_compute_utils import load_lab_params
-from epoch_data import (load_nvidia_owners_cumulative, load_chip_sales_cumulative,
-                        load_data_center_timelines)
+from epoch_data import load_nvidia_owners_cumulative, load_chip_sales_cumulative
 
 # Each model reseeds 42 so it reproduces its canonical notebook run. Side
 # effect: the labs share one RNG stream, so per-sample values are artificially
@@ -731,155 +730,145 @@ def model_anthropic_2024():
 # ---------------------------------------------------------------------------
 # 6. SpaceXAI (Colossus-anchored; end-2024, end-2025, and mid-2026)
 # ---------------------------------------------------------------------------
-# SpaceXAI H100e = Colossus capacity x accuracy factor + other compute, per the
+# SpaceXAI H100e = Colossus capacity + other compute - cloud sales, per the
 # methodology of https://epoch.ai/gradient-updates/frontier-labs-dont-use-most-ai-compute:
 # nearly all of SpaceXAI's compute is the two Memphis-area Colossus campuses,
-# so the fleet is anchored directly on Epoch's dated data-center capacity
-# estimates rather than on chip-fleet accounting. "Other compute" is a small
-# buffer for capacity outside the two campuses: third-party cloud purchases
-# (bounded by the S-1's blended infrastructure-and-cloud expense lines,
-# roughly $1-2B/yr at end-2025) plus minor owned sites (Atlanta, Portland).
+# so the fleet is anchored directly on the Colossus disclosure record (S-1 chip
+# counts, company announcements) as dated by Epoch's data-center timelines,
+# rather than on chip-fleet accounting. "Other compute" is a small buffer for
+# capacity outside the two campuses: third-party cloud purchases (bounded by
+# the S-1's blended infrastructure-and-cloud expense lines, roughly $1-2B/yr
+# at end-2025) plus minor owned sites (Atlanta, Portland).
 #
-# The two sites read the timeline differently. Colossus 1 grew rack by rack
-# (100k -> 200k H100s over fall 2024), so snapshots between its milestones
-# interpolate linearly. Colossus 2 arrives in discrete phases (whole 110k- or
-# 220k-GPU clusters), and its later milestones are Epoch *projections* from
-# cooling-equipment progress, not observations — so a snapshot takes the last
-# milestone at or before it as firm and samples what fraction of the next
-# phase is already open (the c2_next_phase_open prior; mid-2026 sits one day
-# before the projected ~July 1 completion of the 400+ MW expansion).
+# Colossus at each snapshot is a firm disclosed level plus the in-progress
+# phase times how much of it is done. The component sizes are literals taken
+# from the disclosure record (Epoch's C2 levels are the S-1 chip counts x
+# 2.527 H100e per GB200/GB300); the spacexai_compute_model notebook derives
+# them in prose and asserts an exact match against this function.
+#
+#   end-2024: Colossus 1 phase 1 (100k H100s, online Sept 2024) + phase 2 (the
+#             second 100k Hoppers, credited by Epoch in Feb 2025) x a sampled
+#             completion share.
+#   end-2025: C1 complete (276k) + C2 cluster 1 (278k, S-1) as a disclosure-
+#             pinned floor + C2 cluster 2 (278k, Epoch-dated Apr 6 2026) x a
+#             completion share that is 0 with probability 1 - p (nothing
+#             energized yet, the central case) and a clipped-normal share-if-
+#             live draw otherwise.
+#   mid-2026: everything through C2's 400+ MW phase 3 sampled as one firm
+#             level (Epoch's 1.39M +/-10%) + the pending ~Feb 2027 phase x a
+#             sampled fraction open.
 #
 # The mid-2026 snapshot nets out the capacity SpaceX *sells* to other labs —
 # Anthropic (all of Colossus 1 since May 2026, possibly spilling into C2),
 # Google (one ~110k-GPU C2 cluster, ramping toward Sept 2026), and Reflection
 # AI (small C2 carve-out from July 1) — because the estimate targets
 # SpaceXAI's own AI effort, including Cursor (an internal allocation per the
-# S-1), not the SpaceX total. No subtractions before 2026: the sale
-# agreements all start May-July 2026.
+# S-1), not the SpaceX total. Sales subtract the same point levels that went
+# into the fleet, so C1 measurement error nets out. No subtractions before
+# 2026: the sale agreements all start May-July 2026.
 
-SPACEXAI_SNAPSHOTS = {
-    "2024": pd.Timestamp("2024-12-31"),
-    "2025": pd.Timestamp("2025-12-31"),
-    "h1_2026": pd.Timestamp("2026-06-30"),
-}
-
-
-def _site_h100e_at(timelines, site, when):
-    """Operational H100e at one data center on a date, interpolated linearly
-    between Epoch's dated milestone estimates (flat before the first and after
-    the last milestone; milestones without an H100e estimate are skipped)."""
-    rows = (timelines[timelines["Data center"] == site]
-            .dropna(subset=["H100 equivalents"]).sort_values("Date"))
-    days = (rows["Date"] - rows["Date"].iloc[0]).dt.days.to_numpy(dtype=float)
-    target = (when - rows["Date"].iloc[0]).days
-    return float(np.interp(target, days, rows["H100 equivalents"].to_numpy(dtype=float)))
-
-
-def _phase_split_at(timelines, site, when):
-    """Split a phase-built site's capacity at a date into (open, pending):
-    the level at the last milestone at or before the date (0 if none), and
-    the increment to the next milestone (0 if none). Between milestones the
-    open level is firm, while the next phase — often an Epoch projection —
-    may be anywhere from not started to fully online."""
-    rows = (timelines[timelines["Data center"] == site]
-            .dropna(subset=["H100 equivalents"]).sort_values("Date"))
-    levels = rows["H100 equivalents"].to_numpy(dtype=float)
-    before = rows["Date"] <= when
-    open_level = float(levels[before.to_numpy()][-1]) if before.any() else 0.0
-    after = ~before
-    next_level = float(levels[after.to_numpy()][0]) if after.any() else open_level
-    return open_level, max(next_level - open_level, 0.0)
+# Colossus component sizes (H100e), from the disclosure record. Keep matched
+# with the literals in notebooks/spacexai_compute_model.py.
+COLOSSUS_1_PHASE1 = 100_000        # 100k H100s online by Sept 2024 (announcement)
+COLOSSUS_1_PHASE2 = 100_000        # second 100k Hoppers, credited by Epoch Feb 2025
+COLOSSUS_1 = 276_000               # 150k H100 + 50k H200 + 30k B200 (complete)
+COLOSSUS_2_CLUSTER1 = 278_000      # S-1: ~110k GB200, online Oct 19 2025
+COLOSSUS_2_CLUSTER2 = 278_000      # S-1: 110k GB300, Epoch-dated Apr 6 2026
+COLOSSUS_2_PENDING_FEB2027 = 712_000   # Epoch's projected ~Feb 2027 expansion
 
 
 def model_spacexai():
     """Returns {"2024": ..., "2025": ..., "h1_2026": ...} H100e sample arrays.
-    The 2024/2025 snapshots are the whole fleet; mid-2026 is net of sales."""
+    The 2024/2025 snapshots are the whole fleet; mid-2026 is net of sales.
+    Samples the sheet priors in the same order as the notebook under the same
+    seed, so the two match exactly."""
     sq.set_seed(42)
     P = load_lab_params()["spacexai"]
-    timelines = load_data_center_timelines()
-
     results = {}
-    for tag, when in SPACEXAI_SNAPSHOTS.items():
-        c1 = _site_h100e_at(timelines, "Colossus 1", when)
-        c2_open, c2_pending = _phase_split_at(timelines, "Colossus 2", when)
-        # One shared accuracy factor per snapshot: how far the true operational
-        # level sits from the timeline read (H100e conversion, satellite power
-        # reads, and — for 2024 — the interpolated Colossus 1 ramp).
-        accuracy = P[f"capacity_accuracy_{tag}"] @ N_SAMPLES
 
-        steps = [
-            step("c1_anchor", "Colossus 1 capacity (Epoch timeline)", c1, "H100e", "constant"),
-            step("c2_open", "Colossus 2, phases observed open", c2_open, "H100e", "constant"),
-        ]
-        if c2_pending > 0:
-            # The next C2 phase is an Epoch projection; sample how much of it
-            # is online by the snapshot date.
-            phase_open = P[f"c2_next_phase_open_{tag}"] @ N_SAMPLES
-            c2 = c2_open + c2_pending * phase_open
-            steps += [
-                step("c2_pending", "Colossus 2, next projected phase", c2_pending,
-                     "H100e", "constant"),
-                step("c2_phase_open", "Share of the next phase open", phase_open,
-                     "share", "input"),
-                step("c2_h100e", "Colossus 2 capacity", c2, "H100e", "derived",
-                     "Colossus 2 phases observed open"
-                     " + Colossus 2 next projected phase × Share of the next phase open"),
-            ]
-        else:
-            c2 = c2_open
-        colossus = (c1 + c2) * accuracy
-        other = P[f"other_compute_{tag}"] @ N_SAMPLES
-        fleet = colossus + other
+    # --- End-2024: Colossus 1 mid-ramp ------------------------------------
+    c1_phase2_complete = P["c1_phase2_complete_2024"] @ N_SAMPLES
+    colossus_2024 = COLOSSUS_1_PHASE1 + COLOSSUS_1_PHASE2 * c1_phase2_complete
+    other_2024 = P["other_compute_2024"] @ N_SAMPLES
+    results["2024"] = colossus_2024 + other_2024
+    MODEL_STEPS["spacexai_2024"] = [
+        step("c1_phase1", "Colossus 1 phase 1 (100k H100s, online Sept 2024)",
+             COLOSSUS_1_PHASE1, "H100e", "constant"),
+        step("c1_phase2", "Colossus 1 phase 2 (second 100k Hoppers)",
+             COLOSSUS_1_PHASE2, "H100e", "constant"),
+        step("c1_phase2_complete", "Share of phase 2 online at Dec 31",
+             c1_phase2_complete, "share", "input"),
+        step("colossus", "Colossus operational capacity", colossus_2024, "H100e", "derived",
+             "Colossus 1 phase 1 + Colossus 1 phase 2 × Share of phase 2 online at Dec 31"),
+        step("other_compute", "Other sites + cloud purchases", other_2024, "H100e", "input"),
+        step("total_h100e", "SpaceXAI compute, end-2024", results["2024"], "H100e", "final",
+             "Colossus operational capacity + Other sites + cloud purchases"),
+    ]
 
-        steps += [
-            step("capacity_accuracy", "Capacity-anchor accuracy", accuracy, "ratio", "input"),
-            step("colossus", "Colossus operational capacity", colossus, "H100e", "derived",
-                 "(Colossus 1 capacity + Colossus 2 capacity) × Capacity-anchor accuracy"),
-            step("other_compute", "Other sites + cloud purchases", other, "H100e", "input"),
-        ]
+    # --- End-2025: disclosure-pinned floor plus a zero-heavy share of cluster 2
+    p_any_live = P["c2_cluster2_any_live_2025"]            # const: plain float
+    share_if_live = P["c2_cluster2_share_if_live_2025"]    # clipped normal
+    c2_cluster2_complete = sq.mixture([sq.const(0), share_if_live],
+                                      [1 - p_any_live, p_any_live]) @ N_SAMPLES
+    colossus_floor_2025 = COLOSSUS_1 + COLOSSUS_2_CLUSTER1
+    colossus_2025 = colossus_floor_2025 + COLOSSUS_2_CLUSTER2 * c2_cluster2_complete
+    other_2025 = P["other_compute_2025"] @ N_SAMPLES
+    results["2025"] = colossus_2025 + other_2025
+    MODEL_STEPS["spacexai_2025"] = [
+        step("colossus_floor", "Colossus 1 complete + Colossus 2 cluster 1 (S-1 floor)",
+             colossus_floor_2025, "H100e", "constant"),
+        step("c2_cluster2", "Colossus 2 cluster 2 (110k GB300, S-1)",
+             COLOSSUS_2_CLUSTER2, "H100e", "constant"),
+        step("c2_any_live", "Probability any of cluster 2 was live at Dec 31",
+             p_any_live, "probability", "constant"),
+        step("c2_cluster2_complete", "Share of cluster 2 online at Dec 31",
+             c2_cluster2_complete, "share", "input"),
+        step("colossus", "Colossus operational capacity", colossus_2025, "H100e", "derived",
+             "Colossus floor + Colossus 2 cluster 2 × Share of cluster 2 online at Dec 31"),
+        step("other_compute", "Other sites + cloud purchases", other_2025, "H100e", "input"),
+        step("total_h100e", "SpaceXAI compute, end-2025", results["2025"], "H100e", "final",
+             "Colossus operational capacity + Other sites + cloud purchases"),
+    ]
 
-        if tag != "h1_2026":
-            results[tag] = fleet
-            steps.append(step("total_h100e", f"SpaceXAI compute, end-{tag}", fleet,
-                              "H100e", "final",
-                              "Colossus operational capacity + Other sites + cloud purchases"))
-            MODEL_STEPS[f"spacexai_{tag}"] = steps
-            continue
+    # --- Mid-2026: the fleet, less capacity sold to other labs ----------------
+    colossus_firm = P["colossus_firm_h1_2026"] @ N_SAMPLES
+    phase_open = P["c2_next_phase_open_h1_2026"] @ N_SAMPLES
+    colossus_h1_2026 = colossus_firm + COLOSSUS_2_PENDING_FEB2027 * phase_open
+    other_h1_2026 = P["other_compute_h1_2026"] @ N_SAMPLES
+    fleet = colossus_h1_2026 + other_h1_2026
 
-        # Mid-2026 cloud sales. Anthropic holds all of Colossus 1, so its base
-        # subtraction reuses the C1 anchor (scaled by the same accuracy draw).
-        anthropic_spillover = P["anthropic_c2_spillover"] @ N_SAMPLES
-        anthropic_sold = c1 * accuracy + anthropic_spillover
-        # The Google deal covers ~110k GPUs — one of C2's two S-1 clusters.
-        # Either cluster carries the same H100e (B300 ≈ B200 at dense 8-bit),
-        # so size the deal off the first-cluster milestone (the end-2025 level).
-        c2_first_cluster, _ = _phase_split_at(timelines, "Colossus 2",
-                                              SPACEXAI_SNAPSHOTS["2025"])
-        google_ramp = P["google_ramp_share"] @ N_SAMPLES
-        google_sold = c2_first_cluster * accuracy * google_ramp
-        reflection_sold = P["reflection_sold_h100e"] @ N_SAMPLES
-        internal = fleet - anthropic_sold - google_sold - reflection_sold
-        results[tag] = internal
-
-        steps += [
-            step("fleet", "Total SpaceX fleet", fleet, "H100e", "derived",
-                 "Colossus operational capacity + Other sites + cloud purchases"),
-            step("anthropic_spillover", "Anthropic spillover into C2",
-                 anthropic_spillover, "H100e", "input"),
-            step("anthropic_sold", "Sold to Anthropic (all of C1)", anthropic_sold,
-                 "H100e", "derived",
-                 "Colossus 1 capacity × Capacity-anchor accuracy + Anthropic spillover into C2"),
-            step("google_ramp_share", "Google ramp share by June 30", google_ramp,
-                 "share", "input"),
-            step("google_sold", "Sold to Google (one C2 cluster, ramping)", google_sold,
-                 "H100e", "derived",
-                 "Colossus 2 first cluster × Capacity-anchor accuracy × Google ramp share by June 30"),
-            step("reflection_sold", "Sold to Reflection AI", reflection_sold,
-                 "H100e", "input"),
-            step("total_h100e", "SpaceXAI compute, mid-2026", internal, "H100e", "final",
-                 "Total SpaceX fleet − Sold to Anthropic − Sold to Google − Sold to Reflection AI"),
-        ]
-        MODEL_STEPS[f"spacexai_{tag}"] = steps
+    anthropic_spillover = P["anthropic_c2_spillover"] @ N_SAMPLES
+    anthropic_sold = COLOSSUS_1 + anthropic_spillover
+    google_ramp = P["google_ramp_share"] @ N_SAMPLES
+    google_sold = COLOSSUS_2_CLUSTER1 * google_ramp
+    reflection_sold = P["reflection_sold_h100e"] @ N_SAMPLES
+    internal = fleet - anthropic_sold - google_sold - reflection_sold
+    results["h1_2026"] = internal
+    MODEL_STEPS["spacexai_h1_2026"] = [
+        step("colossus_firm", "Colossus firm capacity (through C2 phase 3)",
+             colossus_firm, "H100e", "input"),
+        step("c2_pending", "Colossus 2, next projected phase (~Feb 2027)",
+             COLOSSUS_2_PENDING_FEB2027, "H100e", "constant"),
+        step("c2_phase_open", "Share of the next phase open", phase_open, "share", "input"),
+        step("colossus", "Colossus operational capacity", colossus_h1_2026, "H100e", "derived",
+             "Colossus firm capacity + Colossus 2 next projected phase × Share of the next phase open"),
+        step("other_compute", "Other sites + cloud purchases", other_h1_2026, "H100e", "input"),
+        step("fleet", "Total SpaceX fleet", fleet, "H100e", "derived",
+             "Colossus operational capacity + Other sites + cloud purchases"),
+        step("c1_level", "Colossus 1 (sold to Anthropic)", COLOSSUS_1, "H100e", "constant"),
+        step("anthropic_spillover", "Anthropic spillover into C2",
+             anthropic_spillover, "H100e", "input"),
+        step("anthropic_sold", "Sold to Anthropic (all of C1 + spillover)", anthropic_sold,
+             "H100e", "derived", "Colossus 1 + Anthropic spillover into C2"),
+        step("c2_cluster1", "Colossus 2 cluster 1 (the Google deal)",
+             COLOSSUS_2_CLUSTER1, "H100e", "constant"),
+        step("google_ramp_share", "Google ramp share by June 30", google_ramp, "share", "input"),
+        step("google_sold", "Sold to Google (one C2 cluster, ramping)", google_sold,
+             "H100e", "derived", "Colossus 2 cluster 1 × Google ramp share by June 30"),
+        step("reflection_sold", "Sold to Reflection AI", reflection_sold, "H100e", "input"),
+        step("total_h100e", "SpaceXAI compute, mid-2026", internal, "H100e", "final",
+             "Total SpaceX fleet − Sold to Anthropic − Sold to Google − Sold to Reflection AI"),
+    ]
     return results
 
 
