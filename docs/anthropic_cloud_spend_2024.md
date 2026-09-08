@@ -52,8 +52,8 @@ Why it stays experimental: it chains three multiplicative uncertain factors (fle
 
 | Assumption | Value | Basis |
 |---|---|---|
-| 2024 cloud spend | $2.5B (2.0–3.0) | The Information |
-| 2025 cloud spend | $6.8B (5.5–8.4), corr 0.5 with 2024 | The Information |
+| 2024 cloud spend | $2.5B (×/÷1.2: 2.08–3.0) | The Information |
+| 2025 cloud spend | $6.8B (×/÷1.2: 5.67–8.16), corr 0.5 with 2024 | The Information |
 | Within-2025 growth shape | 0.9–1.5 | SemiAnalysis quarterly build; WSJ Q1-26 figure |
 | 2024 effective price | $1.50–2.50 /H100e-hr | SA 1-yr index; multi-year discounts vs auxiliary costs |
 | Billing | around the clock at the contract rate | — |
