@@ -133,8 +133,8 @@ def run_lab_steps():
 def generation_timestamp():
     """Stamp written into every row's Notes column: when the tables were
     generated, nothing more (the website's refresh script strips it before
-    comparing values, so it must stay a bare YYYY-MM-DD HH:MM)."""
-    return f"{datetime.datetime.now():%Y-%m-%d %H:%M}"
+    comparing values, so keep the "Generated on YYYY-MM-DD HH:MM" shape)."""
+    return f"Generated on {datetime.datetime.now():%Y-%m-%d %H:%M}"
 
 
 def build_year_end_table(samples):
