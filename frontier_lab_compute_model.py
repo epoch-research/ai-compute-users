@@ -392,12 +392,12 @@ def model_openai():
              "MW", "derived",
              "(Disclosed end-2025 power + Rounding adjustment)"
              " × Power-definition factor × Figure-accuracy factor"),
-        step("lag_quarters", "Deployment lag behind Microsoft's mix", lag_quarters,
+        step("lag_quarters", "Deployment lag behind Nvidia's sales mix", lag_quarters,
              "quarters", "input"),
         step("it_overhead", "Server-to-IT power overhead", it_overhead, "ratio", "input"),
         step("total_h100e", "OpenAI compute, end-2025", total_h100e_by_date[last_date],
              "H100e", "final",
-             "Modelled end-2025 IT power spread across Microsoft's chip mix"
+             "Modelled end-2025 IT power spread across Nvidia's chip sales mix"
              " (shifted by the Deployment lag), each chip type's power turned into"
              " chips at its server watts × Server-to-IT power overhead, then summed"
              " as H100-equivalents"),
